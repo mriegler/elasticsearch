@@ -20,6 +20,7 @@
 package org.elasticsearch.common.io.stream;
 
 import org.elasticsearch.Version;
+import org.elasticsearch.common.bytes.ReleasableBytesReference;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -43,6 +44,26 @@ public abstract class FilterStreamInput extends StreamInput {
     @Override
     public void readBytes(byte[] b, int offset, int len) throws IOException {
         delegate.readBytes(b, offset, len);
+    }
+
+    @Override
+    public ReleasableBytesReference readReleasableBytesReference() throws IOException {
+        return delegate.readReleasableBytesReference();
+    }
+
+    @Override
+    public short readShort() throws IOException {
+        return delegate.readShort();
+    }
+
+    @Override
+    public int readInt() throws IOException {
+        return delegate.readInt();
+    }
+
+    @Override
+    public long readLong() throws IOException {
+        return delegate.readLong();
     }
 
     @Override
@@ -78,5 +99,10 @@ public abstract class FilterStreamInput extends StreamInput {
     @Override
     protected void ensureCanReadBytes(int length) throws EOFException {
         delegate.ensureCanReadBytes(length);
+    }
+
+    @Override
+    public NamedWriteableRegistry namedWriteableRegistry() {
+        return delegate.namedWriteableRegistry();
     }
 }

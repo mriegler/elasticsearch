@@ -20,18 +20,8 @@ public abstract class XPackUsageFeatureTransportAction extends TransportMasterNo
     public XPackUsageFeatureTransportAction(String name, TransportService transportService, ClusterService clusterService,
                                             ThreadPool threadPool, ActionFilters actionFilters,
                                             IndexNameExpressionResolver indexNameExpressionResolver) {
-        super(name, transportService, clusterService, threadPool,
-              actionFilters, indexNameExpressionResolver, XPackUsageRequest::new);
-    }
-
-    @Override
-    protected String executor() {
-        return ThreadPool.Names.MANAGEMENT;
-    }
-
-    @Override
-    protected XPackUsageFeatureResponse newResponse() {
-        return new XPackUsageFeatureResponse();
+        super(name, transportService, clusterService, threadPool, actionFilters, XPackUsageRequest::new, indexNameExpressionResolver,
+                XPackUsageFeatureResponse::new, ThreadPool.Names.MANAGEMENT);
     }
 
     @Override

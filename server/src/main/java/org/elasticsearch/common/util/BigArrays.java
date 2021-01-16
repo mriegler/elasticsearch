@@ -25,6 +25,7 @@ import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.breaker.CircuitBreakingException;
+import org.elasticsearch.common.breaker.PreallocatedCircuitBreakerService;
 import org.elasticsearch.common.lease.Releasable;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.recycler.Recycler;
@@ -58,15 +59,10 @@ public class BigArrays {
 
         long newSize;
         if (minTargetSize < pageSize) {
-            newSize = ArrayUtil.oversize((int)minTargetSize, bytesPerElement);
+            newSize = Math.min(ArrayUtil.oversize((int) minTargetSize, bytesPerElement), pageSize);
         } else {
-            newSize = minTargetSize + (minTargetSize >>> 3);
-        }
-
-        if (newSize > pageSize) {
-            // round to a multiple of pageSize
-            newSize = newSize - (newSize % pageSize) + pageSize;
-            assert newSize % pageSize == 0;
+            final long pages = (minTargetSize + pageSize - 1) / pageSize; // ceil(minTargetSize/pageSize)
+            newSize = pages * pageSize;
         }
 
         return newSize;
@@ -149,6 +145,16 @@ public class BigArrays {
             assert indexIsInt(fromIndex);
             assert indexIsInt(toIndex);
             Arrays.fill(array, (int) fromIndex, (int) toIndex, value);
+        }
+
+        @Override
+        public boolean hasArray() {
+            return true;
+        }
+
+        @Override
+        public byte[] array() {
+            return array;
         }
     }
 
@@ -425,7 +431,15 @@ public class BigArrays {
         return this.circuitBreakingInstance;
     }
 
-    public CircuitBreakerService breakerService() {
+    /**
+     * Creates a new {@link BigArray} pointing at the specified
+     * {@link CircuitBreakerService}. Use with {@link PreallocatedCircuitBreakerService}.
+     */
+    public BigArrays withBreakerService(CircuitBreakerService breakerService) {
+        return new BigArrays(recycler, breakerService, breakerName, checkBreaker);
+    }
+
+    public CircuitBreakerService breakerService() {   // TODO this feels like it is for tests but it has escaped
         return this.circuitBreakingInstance.breakerService;
     }
 
@@ -689,6 +703,35 @@ public class BigArrays {
         }
         final long newSize = overSize(minSize, PageCacheRecycler.LONG_PAGE_SIZE, Long.BYTES);
         return resize(array, newSize);
+    }
+
+    public static class DoubleBinarySearcher extends BinarySearcher{
+
+        DoubleArray array;
+        double searchFor;
+
+        public DoubleBinarySearcher(DoubleArray array){
+            this.array = array;
+            this.searchFor = Integer.MIN_VALUE;
+        }
+
+        @Override
+        protected int compare(int index) {
+            // Prevent use of BinarySearcher.search() and force the use of DoubleBinarySearcher.search()
+            assert this.searchFor != Integer.MIN_VALUE;
+
+            return Double.compare(array.get(index), searchFor);
+        }
+
+        @Override
+        protected double distance(int index) {
+            return Math.abs(array.get(index) - searchFor);
+        }
+
+        public int search(int from, int to, double searchFor) {
+            this.searchFor = searchFor;
+            return super.search(from, to);
+        }
     }
 
     /**

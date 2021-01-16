@@ -9,16 +9,17 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.action.DocWriteRequest;
-import org.elasticsearch.action.bulk.BulkAction;
 import org.elasticsearch.action.bulk.BulkRequest;
-import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.client.Client;
+import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.search.SearchHit;
-import org.elasticsearch.xpack.core.ClientHelper;
+import org.elasticsearch.tasks.TaskId;
 import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
 import org.elasticsearch.xpack.ml.dataframe.extractor.DataFrameDataExtractor;
 import org.elasticsearch.xpack.ml.dataframe.process.results.RowResults;
+import org.elasticsearch.xpack.ml.utils.persistence.LimitAwareBulkIndexer;
+import org.elasticsearch.xpack.ml.utils.persistence.ResultsPersisterService;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -37,22 +38,33 @@ class DataFrameRowsJoiner implements AutoCloseable {
     private static final int RESULTS_BATCH_SIZE = 1000;
 
     private final String analyticsId;
-    private final Client client;
+    private final Settings settings;
+    private final TaskId parentTaskId;
     private final DataFrameDataExtractor dataExtractor;
+    private final ResultsPersisterService resultsPersisterService;
     private final Iterator<DataFrameDataExtractor.Row> dataFrameRowsIterator;
     private LinkedList<RowResults> currentResults;
-    private boolean failed;
+    private volatile String failure;
+    private volatile boolean isCancelled;
 
-    DataFrameRowsJoiner(String analyticsId, Client client, DataFrameDataExtractor dataExtractor) {
+    DataFrameRowsJoiner(String analyticsId, Settings settings, TaskId parentTaskId, DataFrameDataExtractor dataExtractor,
+                        ResultsPersisterService resultsPersisterService) {
         this.analyticsId = Objects.requireNonNull(analyticsId);
-        this.client = Objects.requireNonNull(client);
+        this.settings = Objects.requireNonNull(settings);
+        this.parentTaskId = Objects.requireNonNull(parentTaskId);
         this.dataExtractor = Objects.requireNonNull(dataExtractor);
+        this.resultsPersisterService = Objects.requireNonNull(resultsPersisterService);
         this.dataFrameRowsIterator = new ResultMatchingDataFrameRows();
         this.currentResults = new LinkedList<>();
     }
 
+    @Nullable
+    String getFailure() {
+        return failure;
+    }
+
     void processRowResults(RowResults rowResults) {
-        if (failed) {
+        if (failure != null) {
             // If we are in failed state we drop the results but we let the processor
             // parse the output
             return;
@@ -61,9 +73,13 @@ class DataFrameRowsJoiner implements AutoCloseable {
         try {
             addResultAndJoinIfEndOfBatch(rowResults);
         } catch (Exception e) {
-            LOGGER.error(new ParameterizedMessage("[{}] Failed to join results", analyticsId), e);
-            failed = true;
+            LOGGER.error(new ParameterizedMessage("[{}] Failed to join results ", analyticsId), e);
+            failure = "[" + analyticsId + "] Failed to join results: " + e.getMessage();
         }
+    }
+
+    void cancel() {
+        isCancelled = true;
     }
 
     private void addResultAndJoinIfEndOfBatch(RowResults rowResults) {
@@ -74,17 +90,26 @@ class DataFrameRowsJoiner implements AutoCloseable {
     }
 
     private void joinCurrentResults() {
-        BulkRequest bulkRequest = new BulkRequest();
-        while (currentResults.isEmpty() == false) {
-            RowResults result = currentResults.pop();
-            DataFrameDataExtractor.Row row = dataFrameRowsIterator.next();
-            checkChecksumsMatch(row, result);
-            bulkRequest.add(createIndexRequest(result, row.getHit()));
+        try (LimitAwareBulkIndexer bulkIndexer = new LimitAwareBulkIndexer(settings, this::executeBulkRequest)) {
+            while (currentResults.isEmpty() == false) {
+                RowResults result = currentResults.pop();
+                DataFrameDataExtractor.Row row = dataFrameRowsIterator.next();
+                checkChecksumsMatch(row, result);
+                bulkIndexer.addAndExecuteIfNeeded(createIndexRequest(result, row.getHit()));
+            }
         }
-        if (bulkRequest.numberOfActions() > 0) {
-            executeBulkRequest(bulkRequest);
-        }
+
         currentResults = new LinkedList<>();
+    }
+
+    private void executeBulkRequest(BulkRequest bulkRequest) {
+        bulkRequest.setParentTask(parentTaskId);
+        resultsPersisterService.bulkIndexWithHeadersWithRetry(
+            dataExtractor.getHeaders(),
+            bulkRequest,
+            analyticsId,
+            () -> isCancelled == false,
+            retryMessage -> {});
     }
 
     private void checkChecksumsMatch(DataFrameDataExtractor.Row row, RowResults result) {
@@ -93,28 +118,19 @@ class DataFrameRowsJoiner implements AutoCloseable {
             msg += "expected [" + row.getChecksum() + "] but result had [" + result.getChecksum() + "]; ";
             msg += "this implies the data frame index [" + row.getHit().getIndex() + "] was modified while the analysis was running. ";
             msg += "We rely on this index being immutable during a running analysis and so the results will be unreliable.";
-            throw new RuntimeException(msg);
-            // TODO Communicate this error to the user as effectively the analytics have failed (e.g. FAILED state, audit error, etc.)
+            throw ExceptionsHelper.serverError(msg);
         }
     }
 
     private IndexRequest createIndexRequest(RowResults result, SearchHit hit) {
-        Map<String, Object> source = new LinkedHashMap(hit.getSourceAsMap());
+        Map<String, Object> source = new LinkedHashMap<>(hit.getSourceAsMap());
         source.putAll(result.getResults());
         IndexRequest indexRequest = new IndexRequest(hit.getIndex());
         indexRequest.id(hit.getId());
         indexRequest.source(source);
         indexRequest.opType(DocWriteRequest.OpType.INDEX);
+        indexRequest.setParentTask(parentTaskId);
         return indexRequest;
-    }
-
-    private void executeBulkRequest(BulkRequest bulkRequest) {
-        BulkResponse bulkResponse = ClientHelper.executeWithHeaders(dataExtractor.getHeaders(), ClientHelper.ML_ORIGIN, client,
-                () -> client.execute(BulkAction.INSTANCE, bulkRequest).actionGet());
-        if (bulkResponse.hasFailures()) {
-            LOGGER.error("Failures while writing data frame");
-            // TODO Better error handling
-        }
     }
 
     @Override
@@ -123,7 +139,7 @@ class DataFrameRowsJoiner implements AutoCloseable {
             joinCurrentResults();
         } catch (Exception e) {
             LOGGER.error(new ParameterizedMessage("[{}] Failed to join results", analyticsId), e);
-            failed = true;
+            failure = "[" + analyticsId + "] Failed to join results: " + e.getMessage();
         } finally {
             try {
                 consumeDataExtractor();
@@ -153,15 +169,19 @@ class DataFrameRowsJoiner implements AutoCloseable {
         @Override
         public DataFrameDataExtractor.Row next() {
             DataFrameDataExtractor.Row row = null;
-            while ((row == null || row.shouldSkip()) && hasNext()) {
+            while (hasNoMatch(row) && hasNext()) {
                 advanceToNextBatchIfNecessary();
                 row = currentDataFrameRows.get(currentDataFrameRowsIndex++);
             }
 
-            if (row == null || row.shouldSkip()) {
-                throw ExceptionsHelper.serverError("No more data frame rows could be found while joining results");
+            if (hasNoMatch(row)) {
+                throw ExceptionsHelper.serverError("no more data frame rows could be found while joining results");
             }
             return row;
+        }
+
+        private boolean hasNoMatch(DataFrameDataExtractor.Row row) {
+            return row == null || row.shouldSkip() || row.isTraining() == false;
         }
 
         private void advanceToNextBatchIfNecessary() {
@@ -175,9 +195,7 @@ class DataFrameRowsJoiner implements AutoCloseable {
             try {
                 return dataExtractor.next();
             } catch (IOException e) {
-                // TODO Implement recovery strategy or better error reporting
-                LOGGER.error("Error reading next batch of data frame rows", e);
-                return Optional.empty();
+                throw ExceptionsHelper.serverError("error reading next batch of data frame rows [" + e.getMessage() + "]");
             }
         }
     }

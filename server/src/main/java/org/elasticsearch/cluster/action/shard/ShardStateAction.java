@@ -19,6 +19,7 @@
 
 package org.elasticsearch.cluster.action.shard;
 
+import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
@@ -34,9 +35,11 @@ import org.elasticsearch.cluster.ClusterStateTaskListener;
 import org.elasticsearch.cluster.MasterNodeChangePredicate;
 import org.elasticsearch.cluster.NotMasterException;
 import org.elasticsearch.cluster.coordination.FailedToCommitClusterStateException;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.metadata.IndexMetadata;
+import org.elasticsearch.cluster.metadata.Metadata;
 import org.elasticsearch.cluster.node.DiscoveryNode;
-import org.elasticsearch.cluster.routing.RoutingService;
+import org.elasticsearch.cluster.routing.IndexRoutingTable;
+import org.elasticsearch.cluster.routing.RerouteService;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.allocation.AllocationService;
 import org.elasticsearch.cluster.routing.allocation.FailedShard;
@@ -48,6 +51,9 @@ import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.unit.TimeValue;
+import org.elasticsearch.index.Index;
+import org.elasticsearch.index.shard.IndexLongFieldRange;
+import org.elasticsearch.index.shard.ShardLongFieldRange;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.node.NodeClosedException;
 import org.elasticsearch.tasks.Task;
@@ -65,9 +71,11 @@ import org.elasticsearch.transport.TransportService;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -89,16 +97,19 @@ public class ShardStateAction {
 
     @Inject
     public ShardStateAction(ClusterService clusterService, TransportService transportService,
-                            AllocationService allocationService, RoutingService routingService, ThreadPool threadPool) {
+                            AllocationService allocationService, RerouteService rerouteService, ThreadPool threadPool) {
         this.transportService = transportService;
         this.clusterService = clusterService;
         this.threadPool = threadPool;
 
         transportService.registerRequestHandler(SHARD_STARTED_ACTION_NAME, ThreadPool.Names.SAME, StartedShardEntry::new,
-            new ShardStartedTransportHandler(clusterService, new ShardStartedClusterStateTaskExecutor(allocationService, logger), logger));
+            new ShardStartedTransportHandler(clusterService,
+                new ShardStartedClusterStateTaskExecutor(allocationService, rerouteService, logger),
+                logger));
         transportService.registerRequestHandler(SHARD_FAILED_ACTION_NAME, ThreadPool.Names.SAME, FailedShardEntry::new,
             new ShardFailedTransportHandler(clusterService,
-                new ShardFailedClusterStateTaskExecutor(allocationService, routingService, logger), logger));
+                new ShardFailedClusterStateTaskExecutor(allocationService, rerouteService, logger),
+                logger));
     }
 
     private void sendShardAction(final String actionName, final ClusterState currentState,
@@ -135,7 +146,7 @@ public class ShardStateAction {
         }
     }
 
-    private static Class[] MASTER_CHANNEL_EXCEPTIONS = new Class[]{
+    private static final Class<?>[] MASTER_CHANNEL_EXCEPTIONS = new Class[]{
         NotMasterException.class,
         ConnectTransportException.class,
         FailedToCommitClusterStateException.class
@@ -280,12 +291,12 @@ public class ShardStateAction {
 
     public static class ShardFailedClusterStateTaskExecutor implements ClusterStateTaskExecutor<FailedShardEntry> {
         private final AllocationService allocationService;
-        private final RoutingService routingService;
+        private final RerouteService rerouteService;
         private final Logger logger;
 
-        public ShardFailedClusterStateTaskExecutor(AllocationService allocationService, RoutingService routingService, Logger logger) {
+        public ShardFailedClusterStateTaskExecutor(AllocationService allocationService, RerouteService rerouteService, Logger logger) {
             this.allocationService = allocationService;
-            this.routingService = routingService;
+            this.rerouteService = rerouteService;
             this.logger = logger;
         }
 
@@ -297,8 +308,8 @@ public class ShardStateAction {
             List<StaleShard> staleShardsToBeApplied = new ArrayList<>();
 
             for (FailedShardEntry task : tasks) {
-                IndexMetaData indexMetaData = currentState.metaData().index(task.shardId.getIndex());
-                if (indexMetaData == null) {
+                IndexMetadata indexMetadata = currentState.metadata().index(task.shardId.getIndex());
+                if (indexMetadata == null) {
                     // tasks that correspond to non-existent indices are marked as successful
                     logger.debug("{} ignoring shard failed task [{}] (unknown index {})",
                         task.shardId, task, task.shardId.getIndex());
@@ -313,12 +324,12 @@ public class ShardStateAction {
                     // This prevents situations where a new primary has already been selected and replication failures from an old stale
                     // primary unnecessarily fail currently active shards.
                     if (task.primaryTerm > 0) {
-                        long currentPrimaryTerm = indexMetaData.primaryTerm(task.shardId.id());
+                        long currentPrimaryTerm = indexMetadata.primaryTerm(task.shardId.id());
                         if (currentPrimaryTerm != task.primaryTerm) {
                             assert currentPrimaryTerm > task.primaryTerm : "received a primary term with a higher term than in the " +
                                 "current cluster state (received [" + task.primaryTerm + "] but current is [" + currentPrimaryTerm + "])";
                             logger.debug("{} failing shard failed task [{}] (primary term {} does not match current term {})", task.shardId,
-                                task, task.primaryTerm, indexMetaData.primaryTerm(task.shardId.id()));
+                                task, task.primaryTerm, indexMetadata.primaryTerm(task.shardId.id()));
                             batchResultBuilder.failure(task, new NoLongerPrimaryShardException(
                                 task.shardId,
                                 "primary term [" + task.primaryTerm + "] did not match current primary term [" + currentPrimaryTerm + "]"));
@@ -328,7 +339,7 @@ public class ShardStateAction {
 
                     ShardRouting matched = currentState.getRoutingTable().getByAllocationId(task.shardId, task.allocationId);
                     if (matched == null) {
-                        Set<String> inSyncAllocationIds = indexMetaData.inSyncAllocationIds(task.shardId.id());
+                        Set<String> inSyncAllocationIds = indexMetadata.inSyncAllocationIds(task.shardId.id());
                         // mark shard copies without routing entries that are in in-sync allocations set only as stale if the reason why
                         // they were failed is because a write made it into the primary but not to this copy (which corresponds to
                         // the check "primaryTerm > 0").
@@ -343,7 +354,7 @@ public class ShardStateAction {
                             batchResultBuilder.success(task);
                         }
                     } else {
-                        // failing a shard also possibly marks it as stale (see IndexMetaDataUpdater)
+                        // failing a shard also possibly marks it as stale (see IndexMetadataUpdater)
                         logger.debug("{} failing shard {} (shard failed task: [{}])", task.shardId, matched, task);
                         tasksToBeApplied.add(task);
                         failedShardsToBeApplied.add(new FailedShard(matched, task.message, task.failure, task.markAsStale));
@@ -375,11 +386,14 @@ public class ShardStateAction {
         public void clusterStatePublished(ClusterChangedEvent clusterChangedEvent) {
             int numberOfUnassignedShards = clusterChangedEvent.state().getRoutingNodes().unassigned().size();
             if (numberOfUnassignedShards > 0) {
-                String reason = String.format(Locale.ROOT, "[%d] unassigned shards after failing shards", numberOfUnassignedShards);
-                if (logger.isTraceEnabled()) {
-                    logger.trace("{}, scheduling a reroute", reason);
-                }
-                routingService.reroute(reason);
+                // The reroute called after failing some shards will not assign any shard back to the node on which it failed. If there were
+                // no other options for a failed shard then it is left unassigned. However, absent other options it's better to try and
+                // assign it again, even if that means putting it back on the node on which it previously failed:
+                final String reason = String.format(Locale.ROOT, "[%d] unassigned shards after failing shards", numberOfUnassignedShards);
+                logger.trace("{}, scheduling a reroute", reason);
+                rerouteService.reroute(reason, Priority.NORMAL, ActionListener.wrap(
+                    r -> logger.trace("{}, reroute completed", reason),
+                    e -> logger.debug(new ParameterizedMessage("{}, reroute failed", reason), e)));
             }
         }
     }
@@ -389,6 +403,7 @@ public class ShardStateAction {
         final String allocationId;
         final long primaryTerm;
         final String message;
+        @Nullable
         final Exception failure;
         final boolean markAsStale;
 
@@ -403,7 +418,7 @@ public class ShardStateAction {
         }
 
         public FailedShardEntry(ShardId shardId, String allocationId, long primaryTerm,
-                                String message, Exception failure, boolean markAsStale) {
+                                String message, @Nullable Exception failure, boolean markAsStale) {
             this.shardId = shardId;
             this.allocationId = allocationId;
             this.primaryTerm = primaryTerm;
@@ -438,10 +453,10 @@ public class ShardStateAction {
             components.add("allocation id [" + allocationId + "]");
             components.add("primary term [" + primaryTerm + "]");
             components.add("message [" + message + "]");
-            if (failure != null) {
-                components.add("failure [" + ExceptionsHelper.detailedMessage(failure) + "]");
-            }
             components.add("markAsStale [" + markAsStale + "]");
+            if (failure != null) {
+                components.add("failure [" + ExceptionsHelper.stackTrace(failure) + "]");
+            }
             return String.join(", ", components);
         }
 
@@ -466,16 +481,23 @@ public class ShardStateAction {
     public void shardStarted(final ShardRouting shardRouting,
                              final long primaryTerm,
                              final String message,
+                             final ShardLongFieldRange timestampRange,
                              final ActionListener<Void> listener) {
-        shardStarted(shardRouting, primaryTerm, message, listener, clusterService.state());
+        shardStarted(shardRouting, primaryTerm, message, timestampRange, listener, clusterService.state());
     }
 
     public void shardStarted(final ShardRouting shardRouting,
                              final long primaryTerm,
                              final String message,
+                             final ShardLongFieldRange timestampRange,
                              final ActionListener<Void> listener,
                              final ClusterState currentState) {
-        StartedShardEntry entry = new StartedShardEntry(shardRouting.shardId(), shardRouting.allocationId().getId(), primaryTerm, message);
+        final StartedShardEntry entry = new StartedShardEntry(
+                shardRouting.shardId(),
+                shardRouting.allocationId().getId(),
+                primaryTerm,
+                message,
+                timestampRange);
         sendShardAction(SHARD_STARTED_ACTION_NAME, currentState, entry, listener);
     }
 
@@ -508,10 +530,12 @@ public class ShardStateAction {
             implements ClusterStateTaskExecutor<StartedShardEntry>, ClusterStateTaskListener {
         private final AllocationService allocationService;
         private final Logger logger;
+        private final RerouteService rerouteService;
 
-        public ShardStartedClusterStateTaskExecutor(AllocationService allocationService, Logger logger) {
+        public ShardStartedClusterStateTaskExecutor(AllocationService allocationService, RerouteService rerouteService, Logger logger) {
             this.allocationService = allocationService;
             this.logger = logger;
+            this.rerouteService = rerouteService;
         }
 
         @Override
@@ -520,6 +544,7 @@ public class ShardStateAction {
             List<StartedShardEntry> tasksToBeApplied = new ArrayList<>();
             List<ShardRouting> shardRoutingsToBeApplied = new ArrayList<>(tasks.size());
             Set<ShardRouting> seenShardRoutings = new HashSet<>(); // to prevent duplicates
+            final Map<Index, IndexLongFieldRange> updatedTimestampRanges = new HashMap<>();
             for (StartedShardEntry task : tasks) {
                 final ShardRouting matched = currentState.getRoutingTable().getByAllocationId(task.shardId, task.allocationId);
                 if (matched == null) {
@@ -531,9 +556,9 @@ public class ShardStateAction {
                     builder.success(task);
                 } else {
                     if (matched.primary() && task.primaryTerm > 0) {
-                        final IndexMetaData indexMetaData = currentState.metaData().index(task.shardId.getIndex());
-                        assert indexMetaData != null;
-                        final long currentPrimaryTerm = indexMetaData.primaryTerm(task.shardId.id());
+                        final IndexMetadata indexMetadata = currentState.metadata().index(task.shardId.getIndex());
+                        assert indexMetadata != null;
+                        final long currentPrimaryTerm = indexMetadata.primaryTerm(task.shardId.id());
                         if (currentPrimaryTerm != task.primaryTerm) {
                             assert currentPrimaryTerm > task.primaryTerm : "received a primary term with a higher term than in the " +
                                 "current cluster state (received [" + task.primaryTerm + "] but current is [" + currentPrimaryTerm + "])";
@@ -560,6 +585,22 @@ public class ShardStateAction {
                             tasksToBeApplied.add(task);
                             shardRoutingsToBeApplied.add(matched);
                             seenShardRoutings.add(matched);
+
+                            // expand the timestamp range recorded in the index metadata if needed
+                            final Index index = task.shardId.getIndex();
+                            IndexLongFieldRange currentTimestampMillisRange = updatedTimestampRanges.get(index);
+                            final IndexMetadata indexMetadata = currentState.metadata().index(index);
+                            if (currentTimestampMillisRange == null) {
+                                currentTimestampMillisRange = indexMetadata.getTimestampRange();
+                            }
+                            final IndexLongFieldRange newTimestampMillisRange;
+                            newTimestampMillisRange = currentTimestampMillisRange.extendWithShardRange(
+                                    task.shardId.id(),
+                                    indexMetadata.getNumberOfShards(),
+                                    task.timestampRange);
+                            if (newTimestampMillisRange != currentTimestampMillisRange) {
+                                updatedTimestampRanges.put(index, newTimestampMillisRange);
+                            }
                         }
                     }
                 }
@@ -569,6 +610,19 @@ public class ShardStateAction {
             ClusterState maybeUpdatedState = currentState;
             try {
                 maybeUpdatedState = allocationService.applyStartedShards(currentState, shardRoutingsToBeApplied);
+
+                if (updatedTimestampRanges.isEmpty() == false) {
+                    final Metadata.Builder metadataBuilder = Metadata.builder(maybeUpdatedState.metadata());
+                    for (Map.Entry<Index, IndexLongFieldRange> updatedTimestampRangeEntry : updatedTimestampRanges.entrySet()) {
+                        metadataBuilder.put(IndexMetadata
+                                .builder(metadataBuilder.getSafe(updatedTimestampRangeEntry.getKey()))
+                                .timestampRange(updatedTimestampRangeEntry.getValue()));
+                    }
+                    maybeUpdatedState = ClusterState.builder(maybeUpdatedState).metadata(metadataBuilder).build();
+                }
+
+                assert assertStartedIndicesHaveCompleteTimestampRanges(maybeUpdatedState);
+
                 builder.successes(tasksToBeApplied);
             } catch (Exception e) {
                 logger.warn(() -> new ParameterizedMessage("failed to apply started shards {}", shardRoutingsToBeApplied), e);
@@ -576,6 +630,16 @@ public class ShardStateAction {
             }
 
             return builder.build(maybeUpdatedState);
+        }
+
+        private static boolean assertStartedIndicesHaveCompleteTimestampRanges(ClusterState clusterState) {
+            for (ObjectObjectCursor<String, IndexRoutingTable> cursor : clusterState.getRoutingTable().getIndicesRouting()) {
+                assert cursor.value.allPrimaryShardsActive() == false
+                        || clusterState.metadata().index(cursor.key).getTimestampRange().isComplete()
+                        : "index [" + cursor.key + "] should have complete timestamp range, but got "
+                        + clusterState.metadata().index(cursor.key).getTimestampRange() + " for " + cursor.value.prettyPrint();
+            }
+            return true;
         }
 
         @Override
@@ -586,6 +650,13 @@ public class ShardStateAction {
                 logger.error(() -> new ParameterizedMessage("unexpected failure during [{}]", source), e);
             }
         }
+
+        @Override
+        public void clusterStatePublished(ClusterChangedEvent clusterChangedEvent) {
+            rerouteService.reroute("reroute after starting shards", Priority.NORMAL, ActionListener.wrap(
+                r -> logger.trace("reroute after starting shards succeeded"),
+                e -> logger.debug("reroute after starting shards failed", e)));
+        }
     }
 
     public static class StartedShardEntry extends TransportRequest {
@@ -593,6 +664,7 @@ public class ShardStateAction {
         final String allocationId;
         final long primaryTerm;
         final String message;
+        final ShardLongFieldRange timestampRange;
 
         StartedShardEntry(StreamInput in) throws IOException {
             super(in);
@@ -600,13 +672,19 @@ public class ShardStateAction {
             allocationId = in.readString();
             primaryTerm = in.readVLong();
             this.message = in.readString();
+            this.timestampRange = ShardLongFieldRange.readFrom(in);
         }
 
-        public StartedShardEntry(final ShardId shardId, final String allocationId, final long primaryTerm, final String message) {
+        public StartedShardEntry(final ShardId shardId,
+                                 final String allocationId,
+                                 final long primaryTerm,
+                                 final String message,
+                                 final ShardLongFieldRange timestampRange) {
             this.shardId = shardId;
             this.allocationId = allocationId;
             this.primaryTerm = primaryTerm;
             this.message = message;
+            this.timestampRange = timestampRange;
         }
 
         @Override
@@ -616,6 +694,7 @@ public class ShardStateAction {
             out.writeString(allocationId);
             out.writeVLong(primaryTerm);
             out.writeString(message);
+            timestampRange.writeTo(out);
         }
 
         @Override

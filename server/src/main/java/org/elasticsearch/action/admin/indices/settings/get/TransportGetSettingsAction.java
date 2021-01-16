@@ -25,7 +25,7 @@ import org.elasticsearch.action.support.master.TransportMasterNodeReadAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
@@ -36,6 +36,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.settings.SettingsFilter;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.index.Index;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
@@ -45,21 +46,14 @@ public class TransportGetSettingsAction extends TransportMasterNodeReadAction<Ge
     private final SettingsFilter settingsFilter;
     private final IndexScopedSettings indexScopedSettings;
 
-
     @Inject
     public TransportGetSettingsAction(TransportService transportService, ClusterService clusterService,
                                       ThreadPool threadPool, SettingsFilter settingsFilter, ActionFilters actionFilters,
                                       IndexNameExpressionResolver indexNameExpressionResolver, IndexScopedSettings indexedScopedSettings) {
         super(GetSettingsAction.NAME, transportService, clusterService, threadPool, actionFilters, GetSettingsRequest::new,
-            indexNameExpressionResolver);
+            indexNameExpressionResolver, GetSettingsResponse::new, ThreadPool.Names.SAME);
         this.settingsFilter = settingsFilter;
         this.indexScopedSettings = indexedScopedSettings;
-    }
-
-    @Override
-    protected String executor() {
-        // Very lightweight operation
-        return ThreadPool.Names.SAME;
     }
 
     @Override
@@ -68,30 +62,25 @@ public class TransportGetSettingsAction extends TransportMasterNodeReadAction<Ge
             indexNameExpressionResolver.concreteIndexNames(state, request));
     }
 
-
-    @Override
-    protected GetSettingsResponse newResponse() {
-        return new GetSettingsResponse();
-    }
-
     private static boolean isFilteredRequest(GetSettingsRequest request) {
         return CollectionUtils.isEmpty(request.names()) == false;
     }
 
     @Override
-    protected void masterOperation(GetSettingsRequest request, ClusterState state, ActionListener<GetSettingsResponse> listener) {
+    protected void masterOperation(Task task, GetSettingsRequest request, ClusterState state,
+                                   ActionListener<GetSettingsResponse> listener) {
         Index[] concreteIndices = indexNameExpressionResolver.concreteIndices(state, request);
         ImmutableOpenMap.Builder<String, Settings> indexToSettingsBuilder = ImmutableOpenMap.builder();
         ImmutableOpenMap.Builder<String, Settings> indexToDefaultSettingsBuilder = ImmutableOpenMap.builder();
         for (Index concreteIndex : concreteIndices) {
-            IndexMetaData indexMetaData = state.getMetaData().index(concreteIndex);
-            if (indexMetaData == null) {
+            IndexMetadata indexMetadata = state.getMetadata().index(concreteIndex);
+            if (indexMetadata == null) {
                 continue;
             }
 
-            Settings indexSettings = settingsFilter.filter(indexMetaData.getSettings());
+            Settings indexSettings = settingsFilter.filter(indexMetadata.getSettings());
             if (request.humanReadable()) {
-                indexSettings = IndexMetaData.addHumanReadableSettings(indexSettings);
+                indexSettings = IndexMetadata.addHumanReadableSettings(indexSettings);
             }
 
             if (isFilteredRequest(request)) {

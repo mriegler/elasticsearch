@@ -34,13 +34,13 @@ public class GraphInfoTransportActionTests extends ESTestCase {
         GraphInfoTransportAction featureSet = new GraphInfoTransportAction(
             mock(TransportService.class), mock(ActionFilters.class), Settings.EMPTY, licenseState);
         boolean available = randomBoolean();
-        when(licenseState.isGraphAllowed()).thenReturn(available);
+        when(licenseState.isAllowed(XPackLicenseState.Feature.GRAPH)).thenReturn(available);
         assertThat(featureSet.available(), is(available));
 
         var usageAction = new GraphUsageTransportAction(mock(TransportService.class), null, null,
             mock(ActionFilters.class), null, Settings.EMPTY, licenseState);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
-        usageAction.masterOperation(null, null, future);
+        usageAction.masterOperation(null, null, null, future);
         XPackFeatureSet.Usage usage = future.get().getUsage();
         assertThat(usage.available(), is(available));
 
@@ -67,7 +67,7 @@ public class GraphInfoTransportActionTests extends ESTestCase {
         GraphUsageTransportAction usageAction = new GraphUsageTransportAction(mock(TransportService.class),
             null, null, mock(ActionFilters.class), null, settings.build(), licenseState);
         PlainActionFuture<XPackUsageFeatureResponse> future = new PlainActionFuture<>();
-        usageAction.masterOperation(null, null, future);
+        usageAction.masterOperation(null, null, null, future);
         XPackFeatureSet.Usage usage = future.get().getUsage();
         assertThat(usage.enabled(), is(enabled));
 

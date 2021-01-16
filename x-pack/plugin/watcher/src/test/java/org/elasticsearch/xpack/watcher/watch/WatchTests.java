@@ -8,6 +8,7 @@ package org.elasticsearch.xpack.watcher.watch;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.elasticsearch.ElasticsearchParseException;
+import org.elasticsearch.action.DocWriteRequest;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.support.WriteRequest;
 import org.elasticsearch.client.Client;
@@ -441,7 +442,7 @@ public class WatchTests extends ESTestCase {
     private WatchParser createWatchparser() throws Exception {
         LoggingAction loggingAction = new LoggingAction(new TextTemplate("foo"), null, null);
         List<ActionWrapper> actions = Collections.singletonList(new ActionWrapper("_logging_", randomThrottler(), null, null,
-                new ExecutableLoggingAction(loggingAction, logger, new MockTextTemplateEngine())));
+                new ExecutableLoggingAction(loggingAction, logger, new MockTextTemplateEngine()), null, null));
 
         ScheduleRegistry scheduleRegistry = registry(new IntervalSchedule(new IntervalSchedule.Interval(1,
                 IntervalSchedule.Interval.Unit.SECONDS)));
@@ -585,18 +586,20 @@ public class WatchTests extends ESTestCase {
                     randomFrom(DataAttachment.JSON, DataAttachment.YAML), EmailAttachments.EMPTY_ATTACHMENTS);
             list.add(new ActionWrapper("_email_" + randomAlphaOfLength(8), randomThrottler(),
                     AlwaysConditionTests.randomCondition(scriptService), randomTransform(),
-                    new ExecutableEmailAction(action, logger, emailService, templateEngine, htmlSanitizer, Collections.emptyMap())));
+                    new ExecutableEmailAction(action, logger, emailService, templateEngine, htmlSanitizer,
+                            Collections.emptyMap()), null, null));
         }
         if (randomBoolean()) {
             ZoneOffset timeZone = randomBoolean() ? ZoneOffset.UTC : null;
             TimeValue timeout = randomBoolean() ? timeValueSeconds(between(1, 10000)) : null;
             WriteRequest.RefreshPolicy refreshPolicy = randomBoolean() ? null : randomFrom(WriteRequest.RefreshPolicy.values());
-            IndexAction action = new IndexAction("_index", null, randomBoolean() ? "123" : null, null, timeout, timeZone,
-                    refreshPolicy);
+            IndexAction action = new IndexAction("_index", randomBoolean() ? "123" : null,
+                randomBoolean() ? DocWriteRequest.OpType.fromId(randomFrom(new Byte[] { 0, 1 })) : null, null, timeout, timeZone,
+                refreshPolicy);
             list.add(new ActionWrapper("_index_" + randomAlphaOfLength(8), randomThrottler(),
                     AlwaysConditionTests.randomCondition(scriptService),  randomTransform(),
                     new ExecutableIndexAction(action, logger, client, TimeValue.timeValueSeconds(30),
-                            TimeValue.timeValueSeconds(30))));
+                            TimeValue.timeValueSeconds(30)), null, null));
         }
         if (randomBoolean()) {
             HttpRequestTemplate httpRequest = HttpRequestTemplate.builder("test.host", randomIntBetween(8000, 9000))
@@ -606,7 +609,7 @@ public class WatchTests extends ESTestCase {
             WebhookAction action = new WebhookAction(httpRequest);
             list.add(new ActionWrapper("_webhook_" + randomAlphaOfLength(8), randomThrottler(),
                     AlwaysConditionTests.randomCondition(scriptService), randomTransform(),
-                    new ExecutableWebhookAction(action, logger, httpClient, templateEngine)));
+                    new ExecutableWebhookAction(action, logger, httpClient, templateEngine), null, null));
         }
         return list;
     }

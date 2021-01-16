@@ -26,6 +26,7 @@ import org.elasticsearch.action.admin.cluster.node.tasks.cancel.CancelTasksReque
 import org.elasticsearch.action.admin.cluster.node.tasks.get.GetTaskRequest;
 import org.elasticsearch.action.admin.cluster.node.tasks.list.ListTasksRequest;
 import org.elasticsearch.action.admin.cluster.node.usage.NodesUsageRequest;
+import org.elasticsearch.action.admin.cluster.repositories.cleanup.CleanupRepositoryRequest;
 import org.elasticsearch.action.admin.cluster.repositories.delete.DeleteRepositoryRequest;
 import org.elasticsearch.action.admin.cluster.repositories.get.GetRepositoriesRequest;
 import org.elasticsearch.action.admin.cluster.repositories.put.PutRepositoryRequest;
@@ -46,7 +47,6 @@ import org.elasticsearch.action.admin.indices.close.CloseIndexRequest;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequest;
 import org.elasticsearch.action.admin.indices.delete.DeleteIndexRequest;
 import org.elasticsearch.action.admin.indices.flush.FlushRequest;
-import org.elasticsearch.action.admin.indices.flush.SyncedFlushRequest;
 import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeRequest;
 import org.elasticsearch.action.admin.indices.mapping.put.PutMappingRequest;
 import org.elasticsearch.action.admin.indices.open.OpenIndexRequest;
@@ -54,7 +54,6 @@ import org.elasticsearch.action.admin.indices.refresh.RefreshRequest;
 import org.elasticsearch.action.admin.indices.segments.IndicesSegmentsRequest;
 import org.elasticsearch.action.admin.indices.settings.put.UpdateSettingsRequest;
 import org.elasticsearch.action.admin.indices.shards.IndicesShardStoresRequest;
-import org.elasticsearch.action.admin.indices.upgrade.post.UpgradeRequest;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.get.GetRequest;
@@ -83,8 +82,7 @@ public class Requests {
     }
 
     /**
-     * Create an index request against a specific index. Note the {@link IndexRequest#type(String)} must be
-     * set as well and optionally the {@link IndexRequest#id(String)}.
+     * Create an index request against a specific index.
      *
      * @param index The index name to index the request against
      * @return The index request
@@ -95,7 +93,7 @@ public class Requests {
     }
 
     /**
-     * Creates a delete request against a specific index. Note the {@link DeleteRequest#type(String)} and
+     * Creates a delete request against a specific index. Note the
      * {@link DeleteRequest#id(String)} must be set.
      *
      * @param index The index name to delete from
@@ -115,7 +113,7 @@ public class Requests {
 
     /**
      * Creates a get request to get the JSON source from an index based on a type and id. Note, the
-     * {@link GetRequest#type(String)} and {@link GetRequest#id(String)} must be set.
+     * {@link GetRequest#id(String)} must be set.
      *
      * @param index The index to get the JSON source from
      * @return The get request
@@ -249,17 +247,6 @@ public class Requests {
     }
 
     /**
-     * Creates a synced flush indices request.
-     *
-     * @param indices The indices to sync flush. Use {@code null} or {@code _all} to execute against all indices
-     * @return The synced flush request
-     * @see org.elasticsearch.client.IndicesAdminClient#syncedFlush(SyncedFlushRequest)
-     */
-    public static SyncedFlushRequest syncedFlushRequest(String... indices) {
-        return new SyncedFlushRequest(indices);
-    }
-
-    /**
      * Creates a force merge request.
      *
      * @param indices The indices to force merge. Use {@code null} or {@code _all} to execute against all indices
@@ -268,17 +255,6 @@ public class Requests {
      */
     public static ForceMergeRequest forceMergeRequest(String... indices) {
         return new ForceMergeRequest(indices);
-    }
-
-    /**
-     * Creates an upgrade request.
-     *
-     * @param indices The indices to upgrade. Use {@code null} or {@code _all} to execute against all indices
-     * @return The upgrade request
-     * @see org.elasticsearch.client.IndicesAdminClient#upgrade(UpgradeRequest)
-     */
-    public static UpgradeRequest upgradeRequest(String... indices) {
-        return new UpgradeRequest(indices);
     }
 
     /**
@@ -461,6 +437,16 @@ public class Requests {
     }
 
     /**
+     * Cleanup repository
+     *
+     * @param name repository name
+     * @return cleanup repository request
+     */
+    public static CleanupRepositoryRequest cleanupRepositoryRequest(String name) {
+        return new CleanupRepositoryRequest(name);
+    }
+
+    /**
      * Verifies snapshot repository
      *
      * @param name repository name
@@ -504,14 +490,14 @@ public class Requests {
     }
 
     /**
-     * Deletes a snapshot
+     * Deletes snapshots
      *
-     * @param snapshot   snapshot name
+     * @param snapshots  snapshot names
      * @param repository repository name
      * @return delete snapshot request
      */
-    public static DeleteSnapshotRequest deleteSnapshotRequest(String repository, String snapshot) {
-        return new DeleteSnapshotRequest(repository, snapshot);
+    public static DeleteSnapshotRequest deleteSnapshotRequest(String repository, String... snapshots) {
+        return new DeleteSnapshotRequest(repository, snapshots);
     }
 
     /**
@@ -523,5 +509,4 @@ public class Requests {
     public static SnapshotsStatusRequest snapshotsStatusRequest(String repository) {
         return new SnapshotsStatusRequest(repository);
     }
-
 }

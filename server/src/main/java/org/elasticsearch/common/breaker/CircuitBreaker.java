@@ -53,7 +53,7 @@ public interface CircuitBreaker {
      * The in-flight request breaker tracks bytes allocated for reading and
      * writing requests on the network layer.
      */
-    String IN_FLIGHT_REQUESTS = "in_flight_requests";
+    String IN_FLIGHT_REQUESTS = "inflight_requests";
     /**
      * The accounting breaker tracks things held in memory that is independent
      * of the request lifecycle. This includes memory used by Lucene for
@@ -98,17 +98,17 @@ public interface CircuitBreaker {
     void circuitBreak(String fieldName, long bytesNeeded);
 
     /**
-     * add bytes to the breaker and maybe trip
+     * Add bytes to the breaker and trip if the that puts breaker over the limit.
      * @param bytes number of bytes to add
-     * @param label string label describing the bytes being added
-     * @return the number of "used" bytes for the circuit breaker
+     * @param label thing requesting the bytes being added that is included in
+     *              the exception if the breaker is tripped
      */
-    double addEstimateBytesAndMaybeBreak(long bytes, String label) throws CircuitBreakingException;
+    void addEstimateBytesAndMaybeBreak(long bytes, String label) throws CircuitBreakingException;
 
     /**
-     * Adjust the circuit breaker without tripping
+     * Add bytes to the circuit breaker without tripping.
      */
-    long addWithoutBreaking(long bytes);
+    void addWithoutBreaking(long bytes);
 
     /**
      * @return the currently used bytes the breaker is tracking
@@ -139,4 +139,12 @@ public interface CircuitBreaker {
      * @return whether a tripped circuit breaker will reset itself (transient) or requires manual intervention (permanent).
      */
     Durability getDurability();
+
+    /**
+     * sets the new limit and overhead values for the circuit breaker.
+     * The resulting write should be readable by other threads.
+     * @param limit the desired limit
+     * @param overhead the desired overhead constant
+     */
+    void setLimitAndOverhead(long limit, double overhead);
 }

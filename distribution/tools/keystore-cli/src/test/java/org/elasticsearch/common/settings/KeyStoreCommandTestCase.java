@@ -19,6 +19,17 @@
 
 package org.elasticsearch.common.settings;
 
+import com.google.common.jimfs.Configuration;
+import com.google.common.jimfs.Jimfs;
+import org.apache.lucene.util.LuceneTestCase;
+import org.elasticsearch.cli.CommandTestCase;
+import org.elasticsearch.common.io.PathUtilsForTesting;
+import org.elasticsearch.core.internal.io.IOUtils;
+import org.elasticsearch.env.Environment;
+import org.elasticsearch.env.TestEnvironment;
+import org.junit.After;
+import org.junit.Before;
+
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.FileSystem;
@@ -26,17 +37,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-
-import com.google.common.jimfs.Configuration;
-import com.google.common.jimfs.Jimfs;
-import org.elasticsearch.core.internal.io.IOUtils;
-import org.apache.lucene.util.LuceneTestCase;
-import org.elasticsearch.cli.CommandTestCase;
-import org.elasticsearch.common.io.PathUtilsForTesting;
-import org.elasticsearch.env.Environment;
-import org.elasticsearch.env.TestEnvironment;
-import org.junit.After;
-import org.junit.Before;
 
 /**
  * Base test case for manipulating the ES keystore.
@@ -89,16 +89,16 @@ public abstract class KeyStoreCommandTestCase extends CommandTestCase {
         return keystore;
     }
 
-    void assertSecureString(String setting, String value) throws Exception {
-        assertSecureString(loadKeystore(""), setting, value);
+    void assertSecureString(String setting, String value, String password) throws Exception {
+        assertSecureString(loadKeystore(password), setting, value);
     }
 
     void assertSecureString(KeyStoreWrapper keystore, String setting, String value) throws Exception {
         assertEquals(value, keystore.getString(setting).toString());
     }
 
-    void assertSecureFile(String setting, Path file) throws Exception {
-        assertSecureFile(loadKeystore(""), setting, file);
+    void assertSecureFile(String setting, Path file, String password) throws Exception {
+        assertSecureFile(loadKeystore(password), setting, file);
     }
 
     void assertSecureFile(KeyStoreWrapper keystore, String setting, Path file) throws Exception {
@@ -114,10 +114,22 @@ public abstract class KeyStoreCommandTestCase extends CommandTestCase {
             }
             int eof = input.read();
             if (eof != -1) {
-                fail("Found extra bytes in file stream from keystore, expected " + expectedBytes.length +
-                     " bytes but found 0x" + Integer.toHexString(eof));
+                fail(
+                    "Found extra bytes in file stream from keystore, expected "
+                        + expectedBytes.length
+                        + " bytes but found 0x"
+                        + Integer.toHexString(eof)
+                );
             }
         }
 
+    }
+
+    String getPossibleKeystorePassword() {
+        if (inFipsJvm()) {
+            // FIPS Mode JVMs require a password for the ES keystore
+            return "keystorepassword";
+        }
+        return randomFrom("", "keystorepassword");
     }
 }

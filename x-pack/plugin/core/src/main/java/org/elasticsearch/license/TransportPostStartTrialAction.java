@@ -14,6 +14,7 @@ import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
@@ -26,22 +27,12 @@ public class TransportPostStartTrialAction extends TransportMasterNodeAction<Pos
                                          LicenseService licenseService, ThreadPool threadPool, ActionFilters actionFilters,
                                          IndexNameExpressionResolver indexNameExpressionResolver) {
         super(PostStartTrialAction.NAME, transportService, clusterService, threadPool, actionFilters,
-                indexNameExpressionResolver, PostStartTrialRequest::new);
+                PostStartTrialRequest::new, indexNameExpressionResolver, PostStartTrialResponse::new, ThreadPool.Names.SAME);
         this.licenseService = licenseService;
     }
 
     @Override
-    protected String executor() {
-        return ThreadPool.Names.SAME;
-    }
-
-    @Override
-    protected PostStartTrialResponse newResponse() {
-        return new PostStartTrialResponse();
-    }
-
-    @Override
-    protected void masterOperation(PostStartTrialRequest request, ClusterState state,
+    protected void masterOperation(Task task, PostStartTrialRequest request, ClusterState state,
                                    ActionListener<PostStartTrialResponse> listener) throws Exception {
         licenseService.startTrialLicense(request, listener);
     }

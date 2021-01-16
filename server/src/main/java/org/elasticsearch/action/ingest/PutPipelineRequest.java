@@ -26,6 +26,7 @@ import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.ToXContentObject;
 import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentType;
 
 import java.io.IOException;
@@ -44,6 +45,13 @@ public class PutPipelineRequest extends AcknowledgedRequest<PutPipelineRequest> 
         this.id = Objects.requireNonNull(id);
         this.source = Objects.requireNonNull(source);
         this.xContentType = Objects.requireNonNull(xContentType);
+    }
+
+    public PutPipelineRequest(StreamInput in) throws IOException {
+        super(in);
+        id = in.readString();
+        source = in.readBytesReference();
+        xContentType = in.readEnum(XContentType.class);
     }
 
     PutPipelineRequest() {
@@ -67,19 +75,11 @@ public class PutPipelineRequest extends AcknowledgedRequest<PutPipelineRequest> 
     }
 
     @Override
-    public void readFrom(StreamInput in) throws IOException {
-        super.readFrom(in);
-        id = in.readString();
-        source = in.readBytesReference();
-        xContentType = in.readEnum(XContentType.class);
-    }
-
-    @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeString(id);
         out.writeBytesReference(source);
-        out.writeEnum(xContentType);
+        XContentHelper.writeTo(out, xContentType);
     }
 
     @Override

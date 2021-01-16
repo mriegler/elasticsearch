@@ -5,12 +5,13 @@
  */
 package org.elasticsearch.xpack.ml.dataframe.process;
 
+import org.elasticsearch.client.Client;
 import org.elasticsearch.xpack.ml.process.NativeProcess;
 
 import java.io.IOException;
 import java.util.Iterator;
 
-public interface AnalyticsProcess extends NativeProcess {
+public interface AnalyticsProcess<ProcessResult> extends NativeProcess {
 
     /**
      * Writes a control message that informs the process
@@ -22,7 +23,7 @@ public interface AnalyticsProcess extends NativeProcess {
     /**
      * @return stream of data frame analytics results.
      */
-    Iterator<AnalyticsResult> readAnalyticsResults();
+    Iterator<ProcessResult> readAnalyticsResults();
 
     /**
      * Read anything left in the stream before
@@ -31,4 +32,17 @@ public interface AnalyticsProcess extends NativeProcess {
      * a SIGPIPE
      */
     void consumeAndCloseOutputStream();
+
+    /**
+     *
+     * @return the process config
+     */
+    AnalyticsProcessConfig getConfig();
+
+    /**
+     * Restores the model state from a previously persisted one
+     * @param client the client to use for fetching the state documents
+     * @param stateDocIdPrefix the prefix of ids of the state documents
+     */
+    void restoreState(Client client, String stateDocIdPrefix) throws IOException;
 }

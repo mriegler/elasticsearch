@@ -22,14 +22,15 @@ package org.elasticsearch.tasks;
 import org.elasticsearch.common.Nullable;
 
 import java.util.Map;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * A task that can be canceled
+ * A task that can be cancelled
  */
-public abstract class CancellableTask extends Task {
+public class CancellableTask extends Task {
 
-    private final AtomicReference<String> reason = new AtomicReference<>();
+    private volatile String reason;
+    private final AtomicBoolean cancelled = new AtomicBoolean(false);
 
     public CancellableTask(long id, String type, String action, String description, TaskId parentTaskId, Map<String, String> headers) {
         super(id, type, action, description, parentTaskId, headers);
@@ -40,33 +41,31 @@ public abstract class CancellableTask extends Task {
      */
     final void cancel(String reason) {
         assert reason != null;
-        this.reason.compareAndSet(null, reason);
-        onCancelled();
+        if (cancelled.compareAndSet(false, true)) {
+            this.reason = reason;
+            onCancelled();
+        }
     }
 
     /**
-     * Returns true if this task should be automatically cancelled if the coordinating node that
-     * requested this task left the cluster.
+     * Returns whether this task's children need to be cancelled too. {@code true} is a reasonable response even for tasks that have no
+     * children, since child tasks might be added in future and it'd be easy to forget to update this, but returning {@code false} saves
+     * a bit of computation in the task manager.
      */
-    public boolean cancelOnParentLeaving() {
+    public boolean shouldCancelChildrenOnCancellation() {
         return true;
     }
 
-    /**
-     * Returns true if this task can potentially have children that need to be cancelled when it parent is cancelled.
-     */
-    public abstract boolean shouldCancelChildrenOnCancellation();
-
     public boolean isCancelled() {
-        return reason.get() != null;
+        return cancelled.get();
     }
 
     /**
      * The reason the task was cancelled or null if it hasn't been cancelled.
      */
     @Nullable
-    public String getReasonCancelled() {
-        return reason.get();
+    public final String getReasonCancelled() {
+        return reason;
     }
 
     /**

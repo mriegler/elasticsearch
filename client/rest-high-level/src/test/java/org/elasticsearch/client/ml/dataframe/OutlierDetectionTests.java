@@ -26,6 +26,7 @@ import java.io.IOException;
 
 import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.is;
 
 public class OutlierDetectionTests extends AbstractXContentTestCase<OutlierDetection> {
 
@@ -33,7 +34,10 @@ public class OutlierDetectionTests extends AbstractXContentTestCase<OutlierDetec
         return OutlierDetection.builder()
             .setNNeighbors(randomBoolean() ? null : randomIntBetween(1, 20))
             .setMethod(randomBoolean() ? null : randomFrom(OutlierDetection.Method.values()))
-            .setMinScoreToWriteFeatureInfluence(randomBoolean() ? null : randomDoubleBetween(0.0, 1.0, true))
+            .setFeatureInfluenceThreshold(randomBoolean() ? null : randomDoubleBetween(0.0, 1.0, true))
+            .setComputeFeatureInfluence(randomBoolean() ? null : randomBoolean())
+            .setOutlierFraction(randomBoolean() ? null : randomDoubleBetween(0.0, 1.0, true))
+            .setStandardizationEnabled(randomBoolean() ? null : randomBoolean())
             .build();
     }
 
@@ -56,7 +60,10 @@ public class OutlierDetectionTests extends AbstractXContentTestCase<OutlierDetec
         OutlierDetection outlierDetection = OutlierDetection.createDefault();
         assertNull(outlierDetection.getNNeighbors());
         assertNull(outlierDetection.getMethod());
-        assertNull(outlierDetection.getMinScoreToWriteFeatureInfluence());
+        assertNull(outlierDetection.getFeatureInfluenceThreshold());
+        assertNull(outlierDetection.getComputeFeatureInfluence());
+        assertNull(outlierDetection.getOutlierFraction());
+        assertNull(outlierDetection.getStandardizationEnabled());
     }
 
     public void testGetParams_GivenExplicitValues() {
@@ -64,10 +71,16 @@ public class OutlierDetectionTests extends AbstractXContentTestCase<OutlierDetec
             OutlierDetection.builder()
                 .setNNeighbors(42)
                 .setMethod(OutlierDetection.Method.LDOF)
-                .setMinScoreToWriteFeatureInfluence(0.5)
+                .setFeatureInfluenceThreshold(0.5)
+                .setComputeFeatureInfluence(true)
+                .setOutlierFraction(0.42)
+                .setStandardizationEnabled(false)
                 .build();
         assertThat(outlierDetection.getNNeighbors(), equalTo(42));
         assertThat(outlierDetection.getMethod(), equalTo(OutlierDetection.Method.LDOF));
-        assertThat(outlierDetection.getMinScoreToWriteFeatureInfluence(), closeTo(0.5, 1E-9));
+        assertThat(outlierDetection.getFeatureInfluenceThreshold(), closeTo(0.5, 1E-9));
+        assertThat(outlierDetection.getComputeFeatureInfluence(), is(true));
+        assertThat(outlierDetection.getOutlierFraction(), closeTo(0.42, 1E-9));
+        assertThat(outlierDetection.getStandardizationEnabled(), is(false));
     }
 }

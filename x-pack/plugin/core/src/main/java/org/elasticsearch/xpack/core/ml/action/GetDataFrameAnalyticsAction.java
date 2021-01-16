@@ -5,9 +5,7 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
-import org.elasticsearch.action.ActionRequestBuilder;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.xpack.core.action.AbstractGetResourcesRequest;
@@ -16,20 +14,14 @@ import org.elasticsearch.xpack.core.action.util.QueryPage;
 import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsConfig;
 
 import java.io.IOException;
-import java.util.Collections;
 
-public class GetDataFrameAnalyticsAction extends Action<GetDataFrameAnalyticsAction.Response> {
+public class GetDataFrameAnalyticsAction extends ActionType<GetDataFrameAnalyticsAction.Response> {
 
     public static final GetDataFrameAnalyticsAction INSTANCE = new GetDataFrameAnalyticsAction();
-    public static final String NAME = "cluster:admin/xpack/ml/data_frame/analytics/get";
+    public static final String NAME = "cluster:monitor/xpack/ml/data_frame/analytics/get";
 
     private GetDataFrameAnalyticsAction() {
-        super(NAME);
-    }
-
-    @Override
-    public Response newResponse() {
-        return new Response(new QueryPage<>(Collections.emptyList(), 0, Response.RESULTS_FIELD));
+        super(NAME, Response::new);
     }
 
     public static class Request extends AbstractGetResourcesRequest {
@@ -46,7 +38,7 @@ public class GetDataFrameAnalyticsAction extends Action<GetDataFrameAnalyticsAct
         }
 
         public Request(StreamInput in) throws IOException {
-            readFrom(in);
+            super(in);
         }
 
         @Override
@@ -59,7 +51,9 @@ public class GetDataFrameAnalyticsAction extends Action<GetDataFrameAnalyticsAct
 
         public static final ParseField RESULTS_FIELD = new ParseField("data_frame_analytics");
 
-        public Response() {}
+        public Response(StreamInput in) throws IOException {
+            super(in);
+        }
 
         public Response(QueryPage<DataFrameAnalyticsConfig> analytics) {
             super(analytics);
@@ -68,13 +62,6 @@ public class GetDataFrameAnalyticsAction extends Action<GetDataFrameAnalyticsAct
         @Override
         protected Reader<DataFrameAnalyticsConfig> getReader() {
             return DataFrameAnalyticsConfig::new;
-        }
-    }
-
-    public static class RequestBuilder extends ActionRequestBuilder<Request, Response> {
-
-        public RequestBuilder(ElasticsearchClient client) {
-            super(client, INSTANCE, new Request());
         }
     }
 }

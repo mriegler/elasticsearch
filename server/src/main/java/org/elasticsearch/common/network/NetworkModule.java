@@ -30,6 +30,7 @@ import org.elasticsearch.common.CheckedFunction;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.io.stream.Writeable;
+import org.elasticsearch.common.settings.ClusterSettings;
 import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
@@ -100,7 +101,7 @@ public final class NetworkModule {
 
     private final Map<String, Supplier<Transport>> transportFactories = new HashMap<>();
     private final Map<String, Supplier<HttpServerTransport>> transportHttpFactories = new HashMap<>();
-    private final List<TransportInterceptor> transportIntercetors = new ArrayList<>();
+    private final List<TransportInterceptor> transportInterceptors = new ArrayList<>();
 
     /**
      * Creates a network module that custom networking classes can be plugged into.
@@ -112,11 +113,12 @@ public final class NetworkModule {
                          CircuitBreakerService circuitBreakerService,
                          NamedWriteableRegistry namedWriteableRegistry,
                          NamedXContentRegistry xContentRegistry,
-                         NetworkService networkService, HttpServerTransport.Dispatcher dispatcher) {
+                         NetworkService networkService, HttpServerTransport.Dispatcher dispatcher,
+                         ClusterSettings clusterSettings) {
         this.settings = settings;
         for (NetworkPlugin plugin : plugins) {
             Map<String, Supplier<HttpServerTransport>> httpTransportFactory = plugin.getHttpTransports(settings, threadPool, bigArrays,
-                pageCacheRecycler, circuitBreakerService, xContentRegistry, networkService, dispatcher);
+                pageCacheRecycler, circuitBreakerService, xContentRegistry, networkService, dispatcher, clusterSettings);
             for (Map.Entry<String, Supplier<HttpServerTransport>> entry : httpTransportFactory.entrySet()) {
                 registerHttpTransport(entry.getKey(), entry.getValue());
             }
@@ -203,7 +205,7 @@ public final class NetworkModule {
      * Registers a new {@link TransportInterceptor}
      */
     private void registerTransportInterceptor(TransportInterceptor interceptor) {
-        this.transportIntercetors.add(Objects.requireNonNull(interceptor, "interceptor must not be null"));
+        this.transportInterceptors.add(Objects.requireNonNull(interceptor, "interceptor must not be null"));
     }
 
     /**
@@ -211,7 +213,7 @@ public final class NetworkModule {
      * @see #registerTransportInterceptor(TransportInterceptor)
      */
     public TransportInterceptor getTransportInterceptor() {
-        return new CompositeTransportInterceptor(this.transportIntercetors);
+        return new CompositeTransportInterceptor(this.transportInterceptors);
     }
 
     static final class CompositeTransportInterceptor implements TransportInterceptor {

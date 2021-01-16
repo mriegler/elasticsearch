@@ -5,11 +5,9 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
 import org.elasticsearch.action.ActionRequest;
-import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ActionRequestValidationException;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -28,18 +26,13 @@ import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
 import java.io.IOException;
 import java.util.Objects;
 
-public class GetBucketsAction extends Action<GetBucketsAction.Response> {
+public class GetBucketsAction extends ActionType<GetBucketsAction.Response> {
 
     public static final GetBucketsAction INSTANCE = new GetBucketsAction();
     public static final String NAME = "cluster:monitor/xpack/ml/job/results/buckets/get";
 
     private GetBucketsAction() {
-        super(NAME);
-    }
-
-    @Override
-    public Response newResponse() {
-        return new Response();
+        super(NAME, Response::new);
     }
 
     public static class Request extends ActionRequest implements ToXContentObject {
@@ -88,6 +81,20 @@ public class GetBucketsAction extends Action<GetBucketsAction.Response> {
         private boolean descending = false;
 
         public Request() {
+        }
+
+        public Request(StreamInput in) throws IOException {
+            super(in);
+            jobId = in.readString();
+            timestamp = in.readOptionalString();
+            expand = in.readBoolean();
+            excludeInterim = in.readBoolean();
+            start = in.readOptionalString();
+            end = in.readOptionalString();
+            anomalyScore = in.readOptionalDouble();
+            pageParams = in.readOptionalWriteable(PageParams::new);
+            sort = in.readString();
+            descending = in.readBoolean();
         }
 
         public Request(String jobId) {
@@ -200,21 +207,6 @@ public class GetBucketsAction extends Action<GetBucketsAction.Response> {
         }
 
         @Override
-        public void readFrom(StreamInput in) throws IOException {
-            super.readFrom(in);
-            jobId = in.readString();
-            timestamp = in.readOptionalString();
-            expand = in.readBoolean();
-            excludeInterim = in.readBoolean();
-            start = in.readOptionalString();
-            end = in.readOptionalString();
-            anomalyScore = in.readOptionalDouble();
-            pageParams = in.readOptionalWriteable(PageParams::new);
-            sort = in.readString();
-            descending = in.readBoolean();
-        }
-
-        @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
             out.writeString(jobId);
@@ -283,16 +275,10 @@ public class GetBucketsAction extends Action<GetBucketsAction.Response> {
         }
     }
 
-    static class RequestBuilder extends ActionRequestBuilder<Request, Response> {
-
-        RequestBuilder(ElasticsearchClient client) {
-            super(client, INSTANCE, new Request());
-        }
-    }
-
     public static class Response extends AbstractGetResourcesResponse<Bucket> implements ToXContentObject {
 
-        public Response() {
+        public Response(StreamInput in) throws IOException {
+            super(in);
         }
 
         public Response(QueryPage<Bucket> buckets) {

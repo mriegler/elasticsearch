@@ -19,6 +19,8 @@
 
 package org.elasticsearch.action.support.master;
 
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.ActionListenerResponseHandler;
@@ -36,8 +38,6 @@ import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.service.ClusterService;
-import org.elasticsearch.common.io.stream.StreamInput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.discovery.MasterNotDiscoveredException;
@@ -45,12 +45,11 @@ import org.elasticsearch.node.NodeClosedException;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.ConnectTransportException;
+import org.elasticsearch.transport.RemoteTransportException;
 import org.elasticsearch.transport.TransportException;
 import org.elasticsearch.transport.TransportService;
 
-import java.io.IOException;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 
 /**
  * A base class for operations that needs to be performed on the master node.
@@ -58,74 +57,41 @@ import java.util.function.Supplier;
 public abstract class TransportMasterNodeAction<Request extends MasterNodeRequest<Request>, Response extends ActionResponse>
     extends HandledTransportAction<Request, Response> {
 
+    private static final Logger logger = LogManager.getLogger(TransportMasterNodeAction.class);
+
     protected final ThreadPool threadPool;
     protected final TransportService transportService;
     protected final ClusterService clusterService;
     protected final IndexNameExpressionResolver indexNameExpressionResolver;
 
-    private final String executor;
+    private final Writeable.Reader<Response> responseReader;
+
+    protected final String executor;
 
     protected TransportMasterNodeAction(String actionName, TransportService transportService,
                                         ClusterService clusterService, ThreadPool threadPool, ActionFilters actionFilters,
-                                        IndexNameExpressionResolver indexNameExpressionResolver, Supplier<Request> request) {
-        this(actionName, true, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver, request);
-    }
-
-    protected TransportMasterNodeAction(String actionName, TransportService transportService,
-                                        ClusterService clusterService, ThreadPool threadPool, ActionFilters actionFilters,
-                                        Writeable.Reader<Request> request, IndexNameExpressionResolver indexNameExpressionResolver) {
-        this(actionName, true, transportService, clusterService, threadPool, actionFilters, request, indexNameExpressionResolver);
-    }
-
-    protected TransportMasterNodeAction(String actionName, boolean canTripCircuitBreaker,
-                                        TransportService transportService, ClusterService clusterService, ThreadPool threadPool,
-                                        ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver,
-                                        Supplier<Request> request) {
-        super(actionName, canTripCircuitBreaker, transportService, actionFilters, request);
-        this.transportService = transportService;
-        this.clusterService = clusterService;
-        this.threadPool = threadPool;
-        this.indexNameExpressionResolver = indexNameExpressionResolver;
-        this.executor = executor();
+                                        Writeable.Reader<Request> request, IndexNameExpressionResolver indexNameExpressionResolver,
+                                        Writeable.Reader<Response> response, String executor) {
+        this(actionName, true, transportService, clusterService, threadPool, actionFilters, request, indexNameExpressionResolver,
+                response, executor);
     }
 
     protected TransportMasterNodeAction(String actionName, boolean canTripCircuitBreaker,
                                         TransportService transportService, ClusterService clusterService, ThreadPool threadPool,
                                         ActionFilters actionFilters, Writeable.Reader<Request> request,
-                                        IndexNameExpressionResolver indexNameExpressionResolver) {
+                                        IndexNameExpressionResolver indexNameExpressionResolver, Writeable.Reader<Response> response,
+                                        String executor) {
         super(actionName, canTripCircuitBreaker, transportService, actionFilters, request);
         this.transportService = transportService;
         this.clusterService = clusterService;
         this.threadPool = threadPool;
         this.indexNameExpressionResolver = indexNameExpressionResolver;
-        this.executor = executor();
+        this.executor = executor;
+        this.responseReader = response;
     }
 
-    protected abstract String executor();
-
-    /**
-     * @deprecated new implementors should override {@link #read(StreamInput)} and use the
-     *             {@link Writeable.Reader} interface.
-     * @return a new response instance. Typically this is used for serialization using the
-     *         {@link Streamable#readFrom(StreamInput)} method.
-     */
-    @Deprecated
-    protected abstract Response newResponse();
-
-    protected Response read(StreamInput in) throws IOException {
-        Response response = newResponse();
-        response.readFrom(in);
-        return response;
-    }
-
-    protected abstract void masterOperation(Request request, ClusterState state, ActionListener<Response> listener) throws Exception;
-
-    /**
-     * Override this operation if access to the task parameter is needed
-     */
-    protected void masterOperation(Task task, Request request, ClusterState state, ActionListener<Response> listener) throws Exception {
-        masterOperation(request, state, listener);
-    }
+    protected abstract void masterOperation(Task task, Request request, ClusterState state,
+                                            ActionListener<Response> listener) throws Exception;
 
     protected boolean localExecute(Request request) {
         return false;
@@ -135,51 +101,48 @@ public abstract class TransportMasterNodeAction<Request extends MasterNodeReques
 
     @Override
     protected void doExecute(Task task, final Request request, ActionListener<Response> listener) {
-        new AsyncSingleAction(task, request, listener).start();
+        ClusterState state = clusterService.state();
+        logger.trace("starting processing request [{}] with cluster state version [{}]", request, state.version());
+        if (task != null) {
+            request.setParentTask(clusterService.localNode().getId(), task.getId());
+        }
+        new AsyncSingleAction(task, request, listener).doStart(state);
     }
 
     class AsyncSingleAction {
 
         private final ActionListener<Response> listener;
         private final Request request;
-        private volatile ClusterStateObserver observer;
+        private ClusterStateObserver observer;
+        private final long startTime;
         private final Task task;
 
         AsyncSingleAction(Task task, Request request, ActionListener<Response> listener) {
             this.task = task;
             this.request = request;
-            if (task != null) {
-                request.setParentTask(clusterService.localNode().getId(), task.getId());
-            }
             this.listener = listener;
-        }
-
-        public void start() {
-            ClusterState state = clusterService.state();
-            this.observer
-                = new ClusterStateObserver(state, clusterService, request.masterNodeTimeout(), logger, threadPool.getThreadContext());
-            doStart(state);
+            this.startTime = threadPool.relativeTimeInMillis();
         }
 
         protected void doStart(ClusterState clusterState) {
             try {
-                final Predicate<ClusterState> masterChangePredicate = MasterNodeChangePredicate.build(clusterState);
                 final DiscoveryNodes nodes = clusterState.nodes();
                 if (nodes.isLocalNodeElectedMaster() || localExecute(request)) {
                     // check for block, if blocked, retry, else, execute locally
                     final ClusterBlockException blockException = checkBlock(request, clusterState);
                     if (blockException != null) {
                         if (!blockException.retryable()) {
+                            logger.trace("can't execute due to a non-retryable cluster block", blockException);
                             listener.onFailure(blockException);
                         } else {
-                            logger.trace("can't execute due to a cluster block, retrying", blockException);
-                            retry(blockException, newState -> {
+                            logger.debug("can't execute due to a cluster block, retrying", blockException);
+                            retry(clusterState, blockException, newState -> {
                                 try {
                                     ClusterBlockException newException = checkBlock(request, newState);
                                     return (newException == null || !newException.retryable());
                                 } catch (Exception e) {
                                     // accept state as block will be rechecked by doStart() and listener.onFailure() then called
-                                    logger.trace("exception occurred during cluster block checking, accepting state", e);
+                                    logger.debug("exception occurred during cluster block checking, accepting state", e);
                                     return true;
                                 }
                             });
@@ -189,37 +152,37 @@ public abstract class TransportMasterNodeAction<Request extends MasterNodeReques
                             if (t instanceof FailedToCommitClusterStateException || t instanceof NotMasterException) {
                                 logger.debug(() -> new ParameterizedMessage("master could not publish cluster state or " +
                                     "stepped down before publishing action [{}], scheduling a retry", actionName), t);
-                                retry(t, masterChangePredicate);
+                                retryOnMasterChange(clusterState, t);
                             } else {
+                                logger.debug("unexpected exception during publication", t);
                                 delegatedListener.onFailure(t);
                             }
                         });
-                        threadPool.executor(executor).execute(new ActionRunnable<Response>(delegate) {
-                            @Override
-                            protected void doRun() throws Exception {
-                                masterOperation(task, request, clusterState, delegate);
-                            }
-                        });
+                        threadPool.executor(executor)
+                            .execute(ActionRunnable.wrap(delegate, l -> masterOperation(task, request, clusterState, l)));
                     }
                 } else {
                     if (nodes.getMasterNode() == null) {
                         logger.debug("no known master node, scheduling a retry");
-                        retry(null, masterChangePredicate);
+                        retryOnMasterChange(clusterState, null);
                     } else {
                         DiscoveryNode masterNode = nodes.getMasterNode();
-                        final String actionName = getMasterActionName(masterNode);
+                        logger.trace("forwarding request [{}] to master [{}]", actionName, masterNode);
                         transportService.sendRequest(masterNode, actionName, request,
-                            new ActionListenerResponseHandler<Response>(listener, TransportMasterNodeAction.this::read) {
+                            new ActionListenerResponseHandler<Response>(listener, responseReader) {
                                 @Override
                                 public void handleException(final TransportException exp) {
                                     Throwable cause = exp.unwrapCause();
-                                    if (cause instanceof ConnectTransportException) {
+                                    if (cause instanceof ConnectTransportException ||
+                                        (exp instanceof RemoteTransportException && cause instanceof NodeClosedException)) {
                                         // we want to retry here a bit to see if a new master is elected
                                         logger.debug("connection exception while trying to forward request with action name [{}] to " +
                                                 "master node [{}], scheduling a retry. Error: [{}]",
                                             actionName, nodes.getMasterNode(), exp.getDetailedMessage());
-                                        retry(cause, masterChangePredicate);
+                                        retryOnMasterChange(clusterState, cause);
                                     } else {
+                                        logger.trace(new ParameterizedMessage("failure when forwarding request [{}] to master [{}]",
+                                            actionName, masterNode), exp);
                                         listener.onFailure(exp);
                                     }
                                 }
@@ -227,15 +190,31 @@ public abstract class TransportMasterNodeAction<Request extends MasterNodeReques
                     }
                 }
             } catch (Exception e) {
+                logger.trace("top-level failure", e);
                 listener.onFailure(e);
             }
         }
 
-        private void retry(final Throwable failure, final Predicate<ClusterState> statePredicate) {
+        private void retryOnMasterChange(ClusterState state, Throwable failure) {
+            retry(state, failure, MasterNodeChangePredicate.build(state));
+        }
+
+        private void retry(ClusterState state, final Throwable failure, final Predicate<ClusterState> statePredicate) {
+            if (observer == null) {
+                final long remainingTimeoutMS = request.masterNodeTimeout().millis() - (threadPool.relativeTimeInMillis() - startTime);
+                if (remainingTimeoutMS <= 0) {
+                    logger.debug(() -> new ParameterizedMessage("timed out before retrying [{}] after failure", actionName), failure);
+                    listener.onFailure(new MasterNotDiscoveredException(failure));
+                    return;
+                }
+                this.observer = new ClusterStateObserver(
+                        state, clusterService, TimeValue.timeValueMillis(remainingTimeoutMS), logger, threadPool.getThreadContext());
+            }
             observer.waitForNextChange(
                 new ClusterStateObserver.Listener() {
                     @Override
                     public void onNewClusterState(ClusterState state) {
+                        logger.trace("retrying with cluster state version [{}]", state.version());
                         doStart(state);
                     }
 
@@ -250,16 +229,7 @@ public abstract class TransportMasterNodeAction<Request extends MasterNodeReques
                             actionName, timeout), failure);
                         listener.onFailure(new MasterNotDiscoveredException(failure));
                     }
-                }, statePredicate
-            );
+                }, statePredicate);
         }
-    }
-
-    /**
-     * Allows to conditionally return a different master node action name in the case an action gets renamed.
-     * This mainly for backwards compatibility should be used rarely
-     */
-    protected String getMasterActionName(DiscoveryNode node) {
-        return actionName;
     }
 }

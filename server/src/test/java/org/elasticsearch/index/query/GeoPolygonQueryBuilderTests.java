@@ -19,12 +19,15 @@
 
 package org.elasticsearch.index.query;
 
+import org.apache.lucene.document.LatLonDocValuesField;
+import org.apache.lucene.document.LatLonPoint;
+import org.apache.lucene.search.IndexOrDocValuesQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
 import org.apache.lucene.search.Query;
 import org.elasticsearch.common.ParsingException;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.geo.builders.ShapeBuilder;
-import org.elasticsearch.search.internal.SearchContext;
+import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.test.AbstractQueryTestCase;
 import org.elasticsearch.test.geo.RandomShapeGenerator;
 import org.elasticsearch.test.geo.RandomShapeGenerator.ShapeType;
@@ -54,12 +57,31 @@ public class GeoPolygonQueryBuilderTests extends AbstractQueryTestCase<GeoPolygo
         if (randomBoolean()) {
             builder.ignoreUnmapped(randomBoolean());
         }
+
         return builder;
     }
 
     @Override
-    protected void doAssertLuceneQuery(GeoPolygonQueryBuilder queryBuilder, Query query, SearchContext context) throws IOException {
-        // todo LatLonPointInPolygon is package private
+    protected void doAssertLuceneQuery(GeoPolygonQueryBuilder queryBuilder, Query query,
+                                       SearchExecutionContext context) throws IOException {
+        MappedFieldType fieldType = context.getFieldType(queryBuilder.fieldName());
+        if (fieldType == null) {
+            assertTrue("Found no indexed geo query.", query instanceof MatchNoDocsQuery);
+        } else { // TODO: Test case when there are no docValues
+            Query indexQuery = ((IndexOrDocValuesQuery) query).getIndexQuery();
+            String expectedFieldName = expectedFieldName(queryBuilder.fieldName());
+            List<GeoPoint> points = queryBuilder.points();
+            double[] lats = new double[points.size()];
+            double[] lons = new double[points.size()];
+            for (int i =0; i < points.size(); i++) {
+                lats[i] = points.get(i).getLat();
+                lons[i] = points.get(i).getLon();
+            }
+            org.apache.lucene.geo.Polygon polygon = new org.apache.lucene.geo.Polygon(lats, lons);
+            assertEquals(LatLonPoint.newPolygonQuery(expectedFieldName, polygon), indexQuery);
+            Query dvQuery = ((IndexOrDocValuesQuery) query).getRandomAccessQuery();
+            assertEquals(LatLonDocValuesField.newSlowPolygonQuery(expectedFieldName, polygon), dvQuery);
+        }
     }
 
     private static List<GeoPoint> randomPolygon() {
@@ -196,10 +218,9 @@ public class GeoPolygonQueryBuilderTests extends AbstractQueryTestCase<GeoPolygo
     }
 
     private void assertGeoPolygonQuery(String query) throws IOException {
-        QueryShardContext context = createShardContext();
-        parseQuery(query).toQuery(context);
-        // TODO LatLonPointInPolygon is package private, need a closeTo check on the query
-        // since some points can be computed from the geohash
+        SearchExecutionContext context = createSearchExecutionContext();
+        GeoPolygonQueryBuilder queryBuilder = (GeoPolygonQueryBuilder) parseQuery(query);
+        doAssertLuceneQuery(queryBuilder, queryBuilder.toQuery(context), context);
     }
 
     public void testFromJson() throws IOException {
@@ -223,18 +244,18 @@ public class GeoPolygonQueryBuilderTests extends AbstractQueryTestCase<GeoPolygo
         List<GeoPoint> polygon = randomPolygon();
         final GeoPolygonQueryBuilder queryBuilder = new GeoPolygonQueryBuilder("unmapped", polygon);
         queryBuilder.ignoreUnmapped(true);
-        Query query = queryBuilder.toQuery(createShardContext());
+        Query query = queryBuilder.toQuery(createSearchExecutionContext());
         assertThat(query, notNullValue());
         assertThat(query, instanceOf(MatchNoDocsQuery.class));
 
         final GeoPolygonQueryBuilder failingQueryBuilder = new GeoPolygonQueryBuilder("unmapped", polygon);
         failingQueryBuilder.ignoreUnmapped(false);
-        QueryShardException e = expectThrows(QueryShardException.class, () -> failingQueryBuilder.toQuery(createShardContext()));
+        QueryShardException e = expectThrows(QueryShardException.class, () -> failingQueryBuilder.toQuery(createSearchExecutionContext()));
         assertThat(e.getMessage(), containsString("failed to find geo_point field [unmapped]"));
     }
 
     public void testPointValidation() throws IOException {
-        QueryShardContext context = createShardContext();
+        SearchExecutionContext context = createSearchExecutionContext();
         String queryInvalidLat = "{\n" +
             "    \"geo_polygon\":{\n" +
             "        \"" + GEO_POINT_FIELD_NAME + "\":{\n" +

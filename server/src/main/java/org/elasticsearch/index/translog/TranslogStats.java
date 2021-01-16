@@ -21,7 +21,6 @@ package org.elasticsearch.index.translog;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.xcontent.ToXContentFragment;
@@ -29,7 +28,7 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 
 import java.io.IOException;
 
-public class TranslogStats implements Streamable, Writeable, ToXContentFragment {
+public class TranslogStats implements Writeable, ToXContentFragment {
 
     private long translogSizeInBytes;
     private int numberOfOperations;
@@ -81,8 +80,12 @@ public class TranslogStats implements Streamable, Writeable, ToXContentFragment 
         this.translogSizeInBytes += translogStats.translogSizeInBytes;
         this.uncommittedOperations += translogStats.uncommittedOperations;
         this.uncommittedSizeInBytes += translogStats.uncommittedSizeInBytes;
-        this.earliestLastModifiedAge =
-            Math.min(this.earliestLastModifiedAge, translogStats.earliestLastModifiedAge);
+        if (this.earliestLastModifiedAge == 0) {
+            this.earliestLastModifiedAge = translogStats.earliestLastModifiedAge;
+        } else {
+            this.earliestLastModifiedAge =
+                Math.min(this.earliestLastModifiedAge, translogStats.earliestLastModifiedAge);
+        }
     }
 
     public long getTranslogSizeInBytes() {
@@ -120,11 +123,6 @@ public class TranslogStats implements Streamable, Writeable, ToXContentFragment 
     @Override
     public String toString() {
         return Strings.toString(this, true, true);
-    }
-
-    @Override
-    public void readFrom(StreamInput in) throws IOException {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override

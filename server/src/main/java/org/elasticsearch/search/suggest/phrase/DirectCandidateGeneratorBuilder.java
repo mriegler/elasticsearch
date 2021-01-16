@@ -27,7 +27,6 @@ import org.apache.lucene.search.spell.NGramDistance;
 import org.apache.lucene.search.spell.StringDistance;
 import org.apache.lucene.search.spell.SuggestMode;
 import org.apache.lucene.util.automaton.LevenshteinAutomata;
-import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
@@ -35,7 +34,7 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.ConstructingObjectParser;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.mapper.MapperService;
+import org.elasticsearch.index.analysis.IndexAnalyzers;
 import org.elasticsearch.search.suggest.SortBy;
 import org.elasticsearch.search.suggest.phrase.PhraseSuggestionBuilder.CandidateGenerator;
 
@@ -408,18 +407,18 @@ public final class DirectCandidateGeneratorBuilder implements CandidateGenerator
     }
 
     @Override
-    public PhraseSuggestionContext.DirectCandidateGenerator build(MapperService mapperService) throws IOException {
+    public PhraseSuggestionContext.DirectCandidateGenerator build(IndexAnalyzers indexAnalyzers) {
         PhraseSuggestionContext.DirectCandidateGenerator generator = new PhraseSuggestionContext.DirectCandidateGenerator();
         generator.setField(this.field);
         transferIfNotNull(this.size, generator::size);
         if (this.preFilter != null) {
-            generator.preFilter(mapperService.getNamedAnalyzer(this.preFilter));
+            generator.preFilter(indexAnalyzers.get(this.preFilter));
             if (generator.preFilter() == null) {
                 throw new IllegalArgumentException("Analyzer [" + this.preFilter + "] doesn't exists");
             }
         }
         if (this.postFilter != null) {
-            generator.postFilter(mapperService.getNamedAnalyzer(this.postFilter));
+            generator.postFilter(indexAnalyzers.get(this.postFilter));
             if (generator.postFilter() == null) {
                 throw new IllegalArgumentException("Analyzer [" + this.postFilter + "] doesn't exists");
             }
@@ -490,7 +489,7 @@ public final class DirectCandidateGeneratorBuilder implements CandidateGenerator
             toXContent(builder, EMPTY_PARAMS);
             return Strings.toString(builder);
         } catch (Exception e) {
-            return "{ \"error\" : \"" + ExceptionsHelper.detailedMessage(e) + "\"}";
+            throw new RuntimeException(e);
         }
     }
 

@@ -19,7 +19,6 @@
 
 package org.elasticsearch.index.query;
 
-import org.apache.logging.log4j.LogManager;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.Fields;
 import org.apache.lucene.search.BooleanClause;
@@ -43,13 +42,13 @@ import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
-import org.elasticsearch.common.logging.DeprecationLogger;
 import org.elasticsearch.common.lucene.search.MoreLikeThisQuery;
 import org.elasticsearch.common.lucene.search.XMoreLikeThis;
 import org.elasticsearch.common.lucene.uid.Versions;
 import org.elasticsearch.common.xcontent.ToXContentObject;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.VersionType;
@@ -79,11 +78,6 @@ import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
  */
 public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQueryBuilder> {
     public static final String NAME = "more_like_this";
-    private static final DeprecationLogger deprecationLogger = new DeprecationLogger(
-        LogManager.getLogger(MoreLikeThisQueryBuilder.class));
-    static final String TYPES_DEPRECATION_MESSAGE = "[types removal] Types are deprecated in [more_like_this] " +
-        "queries. The type should no longer be specified in the [like] and [unlike] sections.";
-
 
     public static final int DEFAULT_MAX_QUERY_TERMS = XMoreLikeThis.DEFAULT_MAX_QUERY_TERMS;
     public static final int DEFAULT_MIN_TERM_FREQ = XMoreLikeThis.DEFAULT_MIN_TERM_FREQ;
@@ -247,7 +241,7 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
             out.writeBoolean(doc != null);
             if (doc != null) {
                 out.writeGenericValue(doc);
-                out.writeEnum(xContentType);
+                XContentHelper.writeTo(out, xContentType);
             } else {
                 out.writeString(id);
             }
@@ -443,7 +437,7 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
                 toXContent(builder, EMPTY_PARAMS);
                 return Strings.toString(builder);
             } catch (Exception e) {
-                return "{ \"error\" : \"" + ExceptionsHelper.detailedMessage(e) + "\"}";
+                throw new RuntimeException(e);
             }
         }
 
@@ -458,14 +452,14 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
             if (this == o) return true;
             if (!(o instanceof Item)) return false;
             Item other = (Item) o;
-            return Objects.equals(index, other.index) &&
-                    Objects.equals(id, other.id) &&
-                    Objects.equals(doc, other.doc) &&
-                    Arrays.equals(fields, other.fields) &&  // otherwise we are comparing pointers
-                    Objects.equals(perFieldAnalyzer, other.perFieldAnalyzer) &&
-                    Objects.equals(routing, other.routing) &&
-                    Objects.equals(version, other.version) &&
-                    Objects.equals(versionType, other.versionType);
+            return Objects.equals(index, other.index)
+                && Objects.equals(id, other.id)
+                && Objects.equals(doc, other.doc)
+                && Arrays.equals(fields, other.fields) // otherwise we are comparing pointers
+                && Objects.equals(perFieldAnalyzer, other.perFieldAnalyzer)
+                && Objects.equals(routing, other.routing)
+                && Objects.equals(version, other.version)
+                && Objects.equals(versionType, other.versionType);
         }
     }
 
@@ -584,6 +578,9 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
      * Defaults to {@code 25}.
      */
     public MoreLikeThisQueryBuilder maxQueryTerms(int maxQueryTerms) {
+        if (maxQueryTerms <= 0) {
+            throw new IllegalArgumentException("requires 'maxQueryTerms' to be greater than 0");
+        }
         this.maxQueryTerms = maxQueryTerms;
         return this;
     }
@@ -939,7 +936,7 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
     }
 
     @Override
-    protected Query doToQuery(QueryShardContext context) throws IOException {
+    protected Query doToQuery(SearchExecutionContext context) throws IOException {
         Item[] likeItems = new Item[this.likeItems.length];
         for (int i = 0; i < likeItems.length; i++) {
             likeItems[i] = new Item(this.likeItems[i]);
@@ -975,9 +972,11 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
         // set analyzer
         Analyzer analyzerObj = context.getIndexAnalyzers().get(analyzer);
         if (analyzerObj == null) {
-            analyzerObj = context.getMapperService().searchAnalyzer();
+            analyzerObj = context.getIndexAnalyzer(f -> {
+                throw new UnsupportedOperationException("No analyzer configured for field " + f);
+            });
         }
-        mltQuery.setAnalyzer(analyzerObj);
+        mltQuery.setAnalyzer(analyzer, analyzerObj);
 
         // set like text fields
         boolean useDefaultField = (fields == null);
@@ -993,7 +992,7 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
             }
         } else {
             for (String field : fields) {
-                MappedFieldType fieldType = context.fieldMapper(field);
+                MappedFieldType fieldType = context.getFieldType(field);
                 if (fieldType != null && SUPPORTED_FIELD_TYPES.contains(fieldType.getClass()) == false) {
                     if (failOnUnsupportedField) {
                         throw new IllegalArgumentException("more_like_this only supports text/keyword fields: [" + field + "]");
@@ -1027,7 +1026,7 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
         }
     }
 
-    private Query handleItems(QueryShardContext context, MoreLikeThisQuery mltQuery, Item[] likeItems, Item[] unlikeItems,
+    private Query handleItems(SearchExecutionContext context, MoreLikeThisQuery mltQuery, Item[] likeItems, Item[] unlikeItems,
                               boolean include, List<String> moreLikeFields, boolean useDefaultField) throws IOException {
         // set default index, type and fields if not specified
         for (Item item : likeItems) {
@@ -1061,7 +1060,7 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
         return boolQuery.build();
     }
 
-    private static void setDefaultIndexTypeFields(QueryShardContext context, Item item, List<String> moreLikeFields,
+    private static void setDefaultIndexTypeFields(SearchExecutionContext context, Item item, List<String> moreLikeFields,
                                                   boolean useDefaultField) {
         if (item.index() == null) {
             item.index(context.index().getName());
@@ -1109,8 +1108,8 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
         }
     }
 
-    private static void handleExclude(BooleanQuery.Builder boolQuery, Item[] likeItems, QueryShardContext context) {
-        MappedFieldType idField = context.fieldMapper(IdFieldMapper.NAME);
+    private static void handleExclude(BooleanQuery.Builder boolQuery, Item[] likeItems, SearchExecutionContext context) {
+        MappedFieldType idField = context.getFieldType(IdFieldMapper.NAME);
         if (idField == null) {
             // no mappings, nothing to exclude
             return;
@@ -1139,23 +1138,23 @@ public class MoreLikeThisQueryBuilder extends AbstractQueryBuilder<MoreLikeThisQ
 
     @Override
     protected boolean doEquals(MoreLikeThisQueryBuilder other) {
-        return Arrays.equals(fields, other.fields) &&
-                Arrays.equals(likeTexts, other.likeTexts) &&
-                Arrays.equals(unlikeTexts, other.unlikeTexts) &&
-                Arrays.equals(likeItems, other.likeItems) &&
-                Arrays.equals(unlikeItems, other.unlikeItems) &&
-                Objects.equals(maxQueryTerms, other.maxQueryTerms) &&
-                Objects.equals(minTermFreq, other.minTermFreq) &&
-                Objects.equals(minDocFreq, other.minDocFreq) &&
-                Objects.equals(maxDocFreq, other.maxDocFreq) &&
-                Objects.equals(minWordLength, other.minWordLength) &&
-                Objects.equals(maxWordLength, other.maxWordLength) &&
-                Arrays.equals(stopWords, other.stopWords) &&  // otherwise we are comparing pointers
-                Objects.equals(analyzer, other.analyzer) &&
-                Objects.equals(minimumShouldMatch, other.minimumShouldMatch) &&
-                Objects.equals(boostTerms, other.boostTerms) &&
-                Objects.equals(include, other.include) &&
-                Objects.equals(failOnUnsupportedField, other.failOnUnsupportedField);
+        return Arrays.equals(fields, other.fields)
+            && Arrays.equals(likeTexts, other.likeTexts)
+            && Arrays.equals(unlikeTexts, other.unlikeTexts)
+            && Arrays.equals(likeItems, other.likeItems)
+            && Arrays.equals(unlikeItems, other.unlikeItems)
+            && Objects.equals(maxQueryTerms, other.maxQueryTerms)
+            && Objects.equals(minTermFreq, other.minTermFreq)
+            && Objects.equals(minDocFreq, other.minDocFreq)
+            && Objects.equals(maxDocFreq, other.maxDocFreq)
+            && Objects.equals(minWordLength, other.minWordLength)
+            && Objects.equals(maxWordLength, other.maxWordLength)
+            && Arrays.equals(stopWords, other.stopWords) // otherwise we are comparing pointers
+            && Objects.equals(analyzer, other.analyzer)
+            && Objects.equals(minimumShouldMatch, other.minimumShouldMatch)
+            && Objects.equals(boostTerms, other.boostTerms)
+            && Objects.equals(include, other.include)
+            && Objects.equals(failOnUnsupportedField, other.failOnUnsupportedField);
     }
 
     @Override

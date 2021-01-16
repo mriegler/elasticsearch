@@ -23,32 +23,34 @@ import org.elasticsearch.ElasticsearchStatusException;
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsRequest;
 import org.elasticsearch.action.admin.indices.settings.get.GetSettingsResponse;
 import org.elasticsearch.client.core.AcknowledgedResponse;
-import org.elasticsearch.client.indexlifecycle.AllocateAction;
-import org.elasticsearch.client.indexlifecycle.DeleteAction;
-import org.elasticsearch.client.indexlifecycle.DeleteLifecyclePolicyRequest;
-import org.elasticsearch.client.indexlifecycle.ExplainLifecycleRequest;
-import org.elasticsearch.client.indexlifecycle.ExplainLifecycleResponse;
-import org.elasticsearch.client.indexlifecycle.ForceMergeAction;
-import org.elasticsearch.client.indexlifecycle.GetLifecyclePolicyRequest;
-import org.elasticsearch.client.indexlifecycle.GetLifecyclePolicyResponse;
-import org.elasticsearch.client.indexlifecycle.IndexLifecycleExplainResponse;
-import org.elasticsearch.client.indexlifecycle.LifecycleAction;
-import org.elasticsearch.client.indexlifecycle.LifecycleManagementStatusRequest;
-import org.elasticsearch.client.indexlifecycle.LifecycleManagementStatusResponse;
-import org.elasticsearch.client.indexlifecycle.LifecyclePolicy;
-import org.elasticsearch.client.indexlifecycle.LifecyclePolicyMetadata;
-import org.elasticsearch.client.indexlifecycle.OperationMode;
-import org.elasticsearch.client.indexlifecycle.Phase;
-import org.elasticsearch.client.indexlifecycle.PhaseExecutionInfo;
-import org.elasticsearch.client.indexlifecycle.PutLifecyclePolicyRequest;
-import org.elasticsearch.client.indexlifecycle.RemoveIndexLifecyclePolicyRequest;
-import org.elasticsearch.client.indexlifecycle.RemoveIndexLifecyclePolicyResponse;
-import org.elasticsearch.client.indexlifecycle.RetryLifecyclePolicyRequest;
-import org.elasticsearch.client.indexlifecycle.RolloverAction;
-import org.elasticsearch.client.indexlifecycle.ShrinkAction;
-import org.elasticsearch.client.indexlifecycle.StartILMRequest;
-import org.elasticsearch.client.indexlifecycle.StopILMRequest;
-import org.elasticsearch.client.indexlifecycle.UnfollowAction;
+import org.elasticsearch.client.ilm.AllocateAction;
+import org.elasticsearch.client.ilm.DeleteAction;
+import org.elasticsearch.client.ilm.DeleteLifecyclePolicyRequest;
+import org.elasticsearch.client.ilm.ExplainLifecycleRequest;
+import org.elasticsearch.client.ilm.ExplainLifecycleResponse;
+import org.elasticsearch.client.ilm.ForceMergeAction;
+import org.elasticsearch.client.ilm.GetLifecyclePolicyRequest;
+import org.elasticsearch.client.ilm.GetLifecyclePolicyResponse;
+import org.elasticsearch.client.ilm.IndexLifecycleExplainResponse;
+import org.elasticsearch.client.ilm.LifecycleAction;
+import org.elasticsearch.client.ilm.LifecycleManagementStatusRequest;
+import org.elasticsearch.client.ilm.LifecycleManagementStatusResponse;
+import org.elasticsearch.client.ilm.LifecyclePolicy;
+import org.elasticsearch.client.ilm.LifecyclePolicyMetadata;
+import org.elasticsearch.client.ilm.OperationMode;
+import org.elasticsearch.client.ilm.Phase;
+import org.elasticsearch.client.ilm.PhaseExecutionInfo;
+import org.elasticsearch.client.ilm.PutLifecyclePolicyRequest;
+import org.elasticsearch.client.ilm.RemoveIndexLifecyclePolicyRequest;
+import org.elasticsearch.client.ilm.RemoveIndexLifecyclePolicyResponse;
+import org.elasticsearch.client.ilm.RetryLifecyclePolicyRequest;
+import org.elasticsearch.client.ilm.RolloverAction;
+import org.elasticsearch.client.ilm.SearchableSnapshotAction;
+import org.elasticsearch.client.ilm.ShrinkAction;
+import org.elasticsearch.client.ilm.StartILMRequest;
+import org.elasticsearch.client.ilm.StopILMRequest;
+import org.elasticsearch.client.ilm.UnfollowAction;
+import org.elasticsearch.client.ilm.WaitForSnapshotAction;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.TimeValue;
 import org.hamcrest.Matchers;
@@ -60,9 +62,10 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static org.elasticsearch.client.indexlifecycle.LifecyclePolicyTests.createRandomPolicy;
+import static org.elasticsearch.client.ilm.LifecyclePolicyTests.createRandomPolicy;
 import static org.elasticsearch.test.ClientAssertions.assertAcked;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
@@ -160,9 +163,12 @@ public class IndexLifecycleIT extends ESRestHighLevelClientTestCase {
         Map<String, LifecycleAction> coldActions = new HashMap<>();
         coldActions.put(UnfollowAction.NAME, new UnfollowAction());
         coldActions.put(AllocateAction.NAME, new AllocateAction(0, null, null, null));
+        coldActions.put(SearchableSnapshotAction.NAME, new SearchableSnapshotAction("repo"));
         lifecyclePhases.put("cold", new Phase("cold", TimeValue.timeValueSeconds(2000), coldActions));
 
-        Map<String, LifecycleAction> deleteActions = Collections.singletonMap(DeleteAction.NAME, new DeleteAction());
+        Map<String, LifecycleAction> deleteActions = new HashMap<>();
+        deleteActions.put(WaitForSnapshotAction.NAME, new WaitForSnapshotAction("policy"));
+        deleteActions.put(DeleteAction.NAME, new DeleteAction());
         lifecyclePhases.put("delete", new Phase("delete", TimeValue.timeValueSeconds(3000), deleteActions));
 
         LifecyclePolicy policy = new LifecyclePolicy(randomAlphaOfLength(10), lifecyclePhases);
@@ -214,7 +220,7 @@ public class IndexLifecycleIT extends ESRestHighLevelClientTestCase {
             assertFalse(squashResponse.managedByILM());
             assertEquals("squash", squashResponse.getIndex());
 
-        });
+        }, 30, TimeUnit.SECONDS);
     }
 
     public void testDeleteLifecycle() throws IOException {

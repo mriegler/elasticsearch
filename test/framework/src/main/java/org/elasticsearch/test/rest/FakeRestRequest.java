@@ -20,6 +20,7 @@
 package org.elasticsearch.test.rest;
 
 import org.elasticsearch.action.ActionListener;
+import org.elasticsearch.action.support.PlainListenableActionFuture;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.xcontent.NamedXContentRegistry;
@@ -48,18 +49,25 @@ public class FakeRestRequest extends RestRequest {
         super(xContentRegistry, params, httpRequest.uri(), httpRequest.getHeaders(), httpRequest, httpChannel);
     }
 
-    private static class FakeHttpRequest implements HttpRequest {
+    public static class FakeHttpRequest implements HttpRequest {
 
         private final Method method;
         private final String uri;
         private final BytesReference content;
         private final Map<String, List<String>> headers;
+        private final Exception inboundException;
 
-        private FakeHttpRequest(Method method, String uri, BytesReference content, Map<String, List<String>> headers) {
+        public FakeHttpRequest(Method method, String uri, BytesReference content, Map<String, List<String>> headers) {
+            this(method, uri, content, headers, null);
+        }
+
+        private FakeHttpRequest(Method method, String uri, BytesReference content, Map<String, List<String>> headers,
+                                Exception inboundException) {
             this.method = method;
             this.uri = uri;
             this.content = content;
             this.headers = headers;
+            this.inboundException = inboundException;
         }
 
         @Override
@@ -113,11 +121,26 @@ public class FakeRestRequest extends RestRequest {
                 }
             };
         }
+
+        @Override
+        public void release() {
+        }
+
+        @Override
+        public HttpRequest releaseAndCopy() {
+            return this;
+        }
+
+        @Override
+        public Exception getInboundException() {
+            return inboundException;
+        }
     }
 
     private static class FakeHttpChannel implements HttpChannel {
 
         private final InetSocketAddress remoteAddress;
+        private final PlainListenableActionFuture<Void> closeFuture = PlainListenableActionFuture.newListenableFuture();
 
         private FakeHttpChannel(InetSocketAddress remoteAddress) {
             this.remoteAddress = remoteAddress;
@@ -140,7 +163,7 @@ public class FakeRestRequest extends RestRequest {
 
         @Override
         public void addCloseListener(ActionListener<Void> listener) {
-
+            closeFuture.addListener(listener);
         }
 
         @Override
@@ -150,7 +173,7 @@ public class FakeRestRequest extends RestRequest {
 
         @Override
         public void close() {
-
+            closeFuture.onResponse(null);
         }
     }
 
@@ -168,6 +191,8 @@ public class FakeRestRequest extends RestRequest {
         private Method method = Method.GET;
 
         private InetSocketAddress address = null;
+
+        private Exception inboundException;
 
         public Builder(NamedXContentRegistry xContentRegistry) {
             this.xContentRegistry = xContentRegistry;
@@ -206,9 +231,18 @@ public class FakeRestRequest extends RestRequest {
             return this;
         }
 
+        public Builder withInboundException(Exception exception) {
+            this.inboundException = exception;
+            return this;
+        }
+
         public FakeRestRequest build() {
-            FakeHttpRequest fakeHttpRequest = new FakeHttpRequest(method, path, content, headers);
+            FakeHttpRequest fakeHttpRequest = new FakeHttpRequest(method, path, content, headers, inboundException);
             return new FakeRestRequest(xContentRegistry, fakeHttpRequest, params, new FakeHttpChannel(address));
         }
+    }
+
+    public static String requestToString(RestRequest restRequest) {
+        return "method=" + restRequest.method() + ",path=" + restRequest.rawPath();
     }
 }

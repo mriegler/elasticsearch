@@ -10,11 +10,15 @@ import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Locale;
 
 public enum DataFrameAnalyticsState implements Writeable {
 
-    STARTED, REINDEXING, ANALYZING, STOPPING, STOPPED;
+    // States reindexing and analyzing are no longer used.
+    // However, we need to keep them for BWC as tasks may be
+    // awaiting assignment in older versioned nodes.
+    STARTED, REINDEXING, ANALYZING, STOPPING, STOPPED, FAILED, STARTING;
 
     public static DataFrameAnalyticsState fromString(String name) {
         return valueOf(name.trim().toUpperCase(Locale.ROOT));
@@ -32,5 +36,12 @@ public enum DataFrameAnalyticsState implements Writeable {
     @Override
     public String toString() {
         return name().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * @return {@code true} if state matches any of the given {@code candidates}
+     */
+    public boolean isAnyOf(DataFrameAnalyticsState... candidates) {
+        return Arrays.stream(candidates).anyMatch(candidate -> this == candidate);
     }
 }

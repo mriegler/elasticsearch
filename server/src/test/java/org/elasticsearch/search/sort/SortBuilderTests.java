@@ -143,16 +143,6 @@ public class SortBuilderTests extends ESTestCase {
                 xContentBuilder.field("sort");
             }
             for (SortBuilder<?> builder : testBuilders) {
-                if (builder instanceof GeoDistanceSortBuilder) {
-                    GeoDistanceSortBuilder gdsb = (GeoDistanceSortBuilder) builder;
-                    if (gdsb.getNestedFilter() != null) {
-                        expectedWarningHeaders.add("[nested_filter] has been deprecated in favour of the [nested] parameter");
-                    }
-                    if (gdsb.getNestedPath() != null) {
-                        expectedWarningHeaders.add("[nested_path] has been deprecated in favour of the [nested] parameter");
-                    }
-                }
-
                 if (builder instanceof ScoreSortBuilder || builder instanceof FieldSortBuilder) {
                     switch (randomIntBetween(0, 2)) {
                     case 0:
@@ -200,19 +190,24 @@ public class SortBuilderTests extends ESTestCase {
         int size = randomIntBetween(1, 5);
         List<SortBuilder<?>> list = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
-            switch (randomIntBetween(0, 3)) {
+            switch (randomIntBetween(0, 5)) {
             case 0:
                 list.add(new ScoreSortBuilder());
                 break;
             case 1:
-                String fieldName = rarely() ? FieldSortBuilder.DOC_FIELD_NAME : randomAlphaOfLengthBetween(1, 10);
-                list.add(new FieldSortBuilder(fieldName));
+                list.add(new FieldSortBuilder( randomAlphaOfLengthBetween(1, 10)));
                 break;
             case 2:
-                list.add(GeoDistanceSortBuilderTests.randomGeoDistanceSortBuilder());
+                list.add(SortBuilders.fieldSort(FieldSortBuilder.DOC_FIELD_NAME));
                 break;
             case 3:
+                list.add(GeoDistanceSortBuilderTests.randomGeoDistanceSortBuilder());
+                break;
+            case 4:
                 list.add(ScriptSortBuilderTests.randomScriptSortBuilder());
+                break;
+            case 5:
+                list.add(SortBuilders.pitTiebreaker());
                 break;
             default:
                 throw new IllegalStateException("unexpected randomization in tests");

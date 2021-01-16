@@ -5,16 +5,13 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
 import org.elasticsearch.action.ActionRequestValidationException;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.support.master.AcknowledgedRequest;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
-import org.elasticsearch.action.support.master.MasterNodeOperationRequestBuilder;
-import org.elasticsearch.client.ElasticsearchClient;
 import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.xcontent.ToXContentFragment;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.xpack.core.ml.datafeed.DatafeedConfig;
@@ -23,23 +20,13 @@ import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
 import java.io.IOException;
 import java.util.Objects;
 
-public class DeleteDatafeedAction extends Action<AcknowledgedResponse> {
+public class DeleteDatafeedAction extends ActionType<AcknowledgedResponse> {
 
     public static final DeleteDatafeedAction INSTANCE = new DeleteDatafeedAction();
     public static final String NAME = "cluster:admin/xpack/ml/datafeeds/delete";
 
     private DeleteDatafeedAction() {
-        super(NAME);
-    }
-
-    @Override
-    public AcknowledgedResponse newResponse() {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
-    }
-
-    @Override
-    public Writeable.Reader<AcknowledgedResponse> getResponseReader() {
-        return AcknowledgedResponse::new;
+        super(NAME, AcknowledgedResponse::readFrom);
     }
 
     public static class Request extends AcknowledgedRequest<Request> implements ToXContentFragment {
@@ -53,7 +40,10 @@ public class DeleteDatafeedAction extends Action<AcknowledgedResponse> {
             this.datafeedId = ExceptionsHelper.requireNonNull(datafeedId, DatafeedConfig.ID.getPreferredName());
         }
 
-        public Request() {
+        public Request(StreamInput in) throws IOException {
+            super(in);
+            datafeedId = in.readString();
+            force = in.readBoolean();
         }
 
         public String getDatafeedId() {
@@ -71,13 +61,6 @@ public class DeleteDatafeedAction extends Action<AcknowledgedResponse> {
         @Override
         public ActionRequestValidationException validate() {
             return null;
-        }
-
-        @Override
-        public void readFrom(StreamInput in) throws IOException {
-            super.readFrom(in);
-            datafeedId = in.readString();
-            force = in.readBoolean();
         }
 
         @Override
@@ -104,13 +87,6 @@ public class DeleteDatafeedAction extends Action<AcknowledgedResponse> {
         @Override
         public int hashCode() {
             return Objects.hash(datafeedId, force);
-        }
-    }
-
-    public static class RequestBuilder extends MasterNodeOperationRequestBuilder<Request, AcknowledgedResponse, RequestBuilder> {
-
-        public RequestBuilder(ElasticsearchClient client, DeleteDatafeedAction action) {
-            super(client, action, new Request());
         }
     }
 }

@@ -51,6 +51,10 @@ public class CreateSnapshotResponseTests extends AbstractXContentTestCase<Create
         List<String> indices = new ArrayList<>();
         indices.add("test0");
         indices.add("test1");
+
+        List<String> dataStreams = new ArrayList<>();
+        dataStreams.add("test0");
+        dataStreams.add("test1");
         String reason = "reason";
         long startTime = System.currentTimeMillis();
         long endTime = startTime + 10000;
@@ -66,7 +70,7 @@ public class CreateSnapshotResponseTests extends AbstractXContentTestCase<Create
         boolean globalState = randomBoolean();
 
         return new CreateSnapshotResponse(
-            new SnapshotInfo(snapshotId, indices, startTime, reason, endTime, totalShards, shardFailures,
+            new SnapshotInfo(snapshotId, indices, dataStreams, startTime, reason, endTime, totalShards, shardFailures,
                 globalState, SnapshotInfoTests.randomUserMetadata()));
     }
 
@@ -75,7 +79,7 @@ public class CreateSnapshotResponseTests extends AbstractXContentTestCase<Create
         // Don't inject random fields into the custom snapshot metadata, because the metadata map is equality-checked after doing a
         // round-trip through xContent serialization/deserialization. Even though the rest of the object ignores unknown fields,
         // `metadata` doesn't ignore unknown fields (it just includes them in the parsed object, because the keys are arbitrary), so any
-        // new fields added to the the metadata before it gets deserialized that weren't in the serialized version will cause the equality
+        // new fields added to the metadata before it gets deserialized that weren't in the serialized version will cause the equality
         // check to fail.
         return field -> field.startsWith("snapshot.metadata");
     }

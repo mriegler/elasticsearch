@@ -30,13 +30,15 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.repositories.RepositoriesService;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
 /**
  * Transport action for verifying repository operation
  */
-public class TransportVerifyRepositoryAction extends TransportMasterNodeAction<VerifyRepositoryRequest, VerifyRepositoryResponse> {
+public class TransportVerifyRepositoryAction extends
+    TransportMasterNodeAction<VerifyRepositoryRequest, VerifyRepositoryResponse> {
 
     private final RepositoriesService repositoriesService;
 
@@ -46,18 +48,8 @@ public class TransportVerifyRepositoryAction extends TransportMasterNodeAction<V
                                            RepositoriesService repositoriesService, ThreadPool threadPool, ActionFilters actionFilters,
                                            IndexNameExpressionResolver indexNameExpressionResolver) {
         super(VerifyRepositoryAction.NAME, transportService, clusterService, threadPool, actionFilters,
-              indexNameExpressionResolver, VerifyRepositoryRequest::new);
+              VerifyRepositoryRequest::new, indexNameExpressionResolver, VerifyRepositoryResponse::new, ThreadPool.Names.SAME);
         this.repositoriesService = repositoriesService;
-    }
-
-    @Override
-    protected String executor() {
-        return ThreadPool.Names.MANAGEMENT;
-    }
-
-    @Override
-    protected VerifyRepositoryResponse newResponse() {
-        return new VerifyRepositoryResponse();
     }
 
     @Override
@@ -66,10 +58,9 @@ public class TransportVerifyRepositoryAction extends TransportMasterNodeAction<V
     }
 
     @Override
-    protected void masterOperation(final VerifyRepositoryRequest request, ClusterState state,
+    protected void masterOperation(Task task, final VerifyRepositoryRequest request, ClusterState state,
                                    final ActionListener<VerifyRepositoryResponse> listener) {
-        repositoriesService.verifyRepository(request.name(), ActionListener.delegateFailure(listener,
-            (delegatedListener, verifyResponse) ->
-                delegatedListener.onResponse(new VerifyRepositoryResponse(verifyResponse.toArray(new DiscoveryNode[0])))));
+        repositoriesService.verifyRepository(request.name(), listener.map(
+                verifyResponse -> new VerifyRepositoryResponse(verifyResponse.toArray(new DiscoveryNode[0]))));
     }
 }

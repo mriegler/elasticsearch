@@ -27,7 +27,6 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.lucene.LuceneTests;
-import org.elasticsearch.common.text.Text;
 import org.elasticsearch.common.xcontent.LoggingDeprecationHandler;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -45,7 +44,7 @@ import java.util.function.Predicate;
 public class SearchHitsTests extends AbstractSerializingTestCase<SearchHits> {
 
     public static SearchHits createTestItem(boolean withOptionalInnerHits, boolean withShardTarget) {
-        return createTestItem(randomFrom(XContentType.values()), withOptionalInnerHits, withShardTarget);
+        return createTestItem(randomFrom(XContentType.values()).canonical(), withOptionalInnerHits, withShardTarget);
     }
 
     private static SearchHit[] createSearchHitArray(int size, XContentType xContentType, boolean withOptionalInnerHits,
@@ -106,7 +105,7 @@ public class SearchHitsTests extends AbstractSerializingTestCase<SearchHits> {
         switch (randomIntBetween(0, 5)) {
             case 0:
                 return new SearchHits(createSearchHitArray(instance.getHits().length + 1,
-                    randomFrom(XContentType.values()), false, randomBoolean()),
+                    randomFrom(XContentType.values()).canonical(), false, randomBoolean()),
                     instance.getTotalHits(), instance.getMaxScore());
             case 1:
                 final TotalHits totalHits;
@@ -177,7 +176,7 @@ public class SearchHitsTests extends AbstractSerializingTestCase<SearchHits> {
         // This instance is used to test the transport serialization so it's fine
         // to produce shard targets (withShardTarget is true) since they are serialized
         // in this layer.
-        return createTestItem(randomFrom(XContentType.values()), true, true);
+        return createTestItem(randomFrom(XContentType.values()).canonical(), true, true);
     }
 
     @Override
@@ -204,8 +203,8 @@ public class SearchHitsTests extends AbstractSerializingTestCase<SearchHits> {
 
     public void testToXContent() throws IOException {
         SearchHit[] hits = new SearchHit[] {
-            new SearchHit(1, "id1", new Text("type"), Collections.emptyMap()),
-            new SearchHit(2, "id2", new Text("type"), Collections.emptyMap()) };
+            new SearchHit(1, "id1", Collections.emptyMap(), Collections.emptyMap()),
+            new SearchHit(2, "id2", Collections.emptyMap(), Collections.emptyMap()) };
 
         long totalHits = 1000;
         float maxScore = 1.5f;
@@ -215,16 +214,16 @@ public class SearchHitsTests extends AbstractSerializingTestCase<SearchHits> {
         searchHits.toXContent(builder, ToXContent.EMPTY_PARAMS);
         builder.endObject();
         assertEquals("{\"hits\":{\"total\":{\"value\":1000,\"relation\":\"eq\"},\"max_score\":1.5," +
-            "\"hits\":[{\"_type\":\"type\",\"_id\":\"id1\",\"_score\":null},"+
-            "{\"_type\":\"type\",\"_id\":\"id2\",\"_score\":null}]}}", Strings.toString(builder));
+            "\"hits\":[{\"_id\":\"id1\",\"_score\":null},"+
+            "{\"_id\":\"id2\",\"_score\":null}]}}", Strings.toString(builder));
     }
 
     public void testFromXContentWithShards() throws IOException {
         for (boolean withExplanation : new boolean[] {true, false}) {
             final SearchHit[] hits = new SearchHit[]{
-                new SearchHit(1, "id1", new Text("type"), Collections.emptyMap()),
-                new SearchHit(2, "id2", new Text("type"), Collections.emptyMap()),
-                new SearchHit(10, "id10", new Text("type"), Collections.emptyMap())
+                new SearchHit(1, "id1", Collections.emptyMap(), Collections.emptyMap()),
+                new SearchHit(2, "id2", Collections.emptyMap(), Collections.emptyMap()),
+                new SearchHit(10, "id10", Collections.emptyMap(), Collections.emptyMap())
             };
 
             for (SearchHit hit : hits) {
@@ -241,7 +240,7 @@ public class SearchHitsTests extends AbstractSerializingTestCase<SearchHits> {
             long totalHits = 1000;
             float maxScore = 1.5f;
             SearchHits searchHits = new SearchHits(hits, new TotalHits(totalHits, TotalHits.Relation.EQUAL_TO), maxScore);
-            XContentType xContentType = randomFrom(XContentType.values());
+            XContentType xContentType = randomFrom(XContentType.values()).canonical();
             BytesReference bytes = toShuffledXContent(searchHits, xContentType, ToXContent.EMPTY_PARAMS, false);
             try (XContentParser parser = xContentType.xContent()
                     .createParser(xContentRegistry(), LoggingDeprecationHandler.INSTANCE, bytes.streamInput())) {

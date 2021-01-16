@@ -19,26 +19,23 @@
 
 package org.elasticsearch.action.bulk;
 
-import org.elasticsearch.action.Action;
-import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.transport.TransportRequestOptions;
 
-public class BulkAction extends Action<BulkResponse> {
+public class BulkAction extends ActionType<BulkResponse> {
 
     public static final BulkAction INSTANCE = new BulkAction();
     public static final String NAME = "indices:data/write/bulk";
 
+    private static final TransportRequestOptions TRANSPORT_REQUEST_OPTIONS =
+            TransportRequestOptions.of(null, TransportRequestOptions.Type.BULK);
+
     private BulkAction() {
-        super(NAME);
+        super(NAME, BulkResponse::new);
     }
 
     @Override
-    public BulkResponse newResponse() {
-        return new BulkResponse();
-    }
-
-    @Override
-    public TransportRequestOptions transportOptions(Settings settings) {
-        return TransportRequestOptions.builder().withType(TransportRequestOptions.Type.BULK).build();
+    public TransportRequestOptions transportOptions() {
+        return TRANSPORT_REQUEST_OPTIONS;
     }
 }

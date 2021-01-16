@@ -5,10 +5,9 @@
  */
 package org.elasticsearch.xpack.core.action;
 
-import org.elasticsearch.action.Action;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.xpack.core.XPackField;
 
-import java.util.Arrays;
 import java.util.List;
 
 /**
@@ -18,7 +17,7 @@ import java.util.List;
  * {@link XPackUsageAction} implementationn iterates over the {@link #ALL} list of actions to form
  * the complete usage result.
  */
-public class XPackUsageFeatureAction extends Action<XPackUsageFeatureResponse> {
+public class XPackUsageFeatureAction extends ActionType<XPackUsageFeatureResponse> {
 
     private static final String BASE_NAME = "cluster:monitor/xpack/usage/";
 
@@ -28,30 +27,57 @@ public class XPackUsageFeatureAction extends Action<XPackUsageFeatureResponse> {
     public static final XPackUsageFeatureAction GRAPH = new XPackUsageFeatureAction(XPackField.GRAPH);
     public static final XPackUsageFeatureAction MACHINE_LEARNING = new XPackUsageFeatureAction(XPackField.MACHINE_LEARNING);
     public static final XPackUsageFeatureAction LOGSTASH = new XPackUsageFeatureAction(XPackField.LOGSTASH);
+    public static final XPackUsageFeatureAction EQL = new XPackUsageFeatureAction(XPackField.EQL);
     public static final XPackUsageFeatureAction SQL = new XPackUsageFeatureAction(XPackField.SQL);
     public static final XPackUsageFeatureAction ROLLUP = new XPackUsageFeatureAction(XPackField.ROLLUP);
     public static final XPackUsageFeatureAction INDEX_LIFECYCLE = new XPackUsageFeatureAction(XPackField.INDEX_LIFECYCLE);
+    public static final XPackUsageFeatureAction SNAPSHOT_LIFECYCLE = new XPackUsageFeatureAction(XPackField.SNAPSHOT_LIFECYCLE);
     public static final XPackUsageFeatureAction CCR = new XPackUsageFeatureAction(XPackField.CCR);
-    public static final XPackUsageFeatureAction DATA_FRAME = new XPackUsageFeatureAction(XPackField.DATA_FRAME);
+    public static final XPackUsageFeatureAction TRANSFORM = new XPackUsageFeatureAction(XPackField.TRANSFORM);
     public static final XPackUsageFeatureAction VECTORS = new XPackUsageFeatureAction(XPackField.VECTORS);
     public static final XPackUsageFeatureAction VOTING_ONLY = new XPackUsageFeatureAction(XPackField.VOTING_ONLY);
+    public static final XPackUsageFeatureAction FROZEN_INDICES = new XPackUsageFeatureAction(XPackField.FROZEN_INDICES);
+    public static final XPackUsageFeatureAction SPATIAL = new XPackUsageFeatureAction(XPackField.SPATIAL);
+    public static final XPackUsageFeatureAction ANALYTICS = new XPackUsageFeatureAction(XPackField.ANALYTICS);
+    public static final XPackUsageFeatureAction ENRICH = new XPackUsageFeatureAction(XPackField.ENRICH);
+    public static final XPackUsageFeatureAction SEARCHABLE_SNAPSHOTS = new XPackUsageFeatureAction(XPackField.SEARCHABLE_SNAPSHOTS);
+    public static final XPackUsageFeatureAction DATA_STREAMS = new XPackUsageFeatureAction(XPackField.DATA_STREAMS);
+    public static final XPackUsageFeatureAction DATA_TIERS = new XPackUsageFeatureAction(XPackField.DATA_TIERS);
+    public static final XPackUsageFeatureAction AGGREGATE_METRIC = new XPackUsageFeatureAction(XPackField.AGGREGATE_METRIC);
+    public static final XPackUsageFeatureAction RUNTIME_FIELDS = new XPackUsageFeatureAction(XPackField.RUNTIME_FIELDS);
 
-    public static final List<XPackUsageFeatureAction> ALL = Arrays.asList(
-        SECURITY, MONITORING, WATCHER, GRAPH, MACHINE_LEARNING, LOGSTASH, SQL, ROLLUP, INDEX_LIFECYCLE, CCR, DATA_FRAME, VECTORS,
-        VOTING_ONLY
+    static final List<XPackUsageFeatureAction> ALL = List.of(
+        AGGREGATE_METRIC,
+        ANALYTICS,
+        CCR,
+        DATA_STREAMS,
+        DATA_TIERS,
+        EQL,
+        FROZEN_INDICES,
+        GRAPH,
+        INDEX_LIFECYCLE,
+        LOGSTASH,
+        MACHINE_LEARNING,
+        MONITORING,
+        ROLLUP,
+        RUNTIME_FIELDS,
+        SEARCHABLE_SNAPSHOTS,
+        SECURITY,
+        SNAPSHOT_LIFECYCLE,
+        SPATIAL,
+        SQL,
+        TRANSFORM,
+        VECTORS,
+        VOTING_ONLY,
+        WATCHER
     );
 
     private XPackUsageFeatureAction(String name) {
-        super(BASE_NAME + name);
-    }
-
-    @Override
-    public XPackUsageFeatureResponse newResponse() {
-        return new XPackUsageFeatureResponse();
+        super(BASE_NAME + name, XPackUsageFeatureResponse::new);
     }
 
     @Override
     public String toString() {
-        return "Action [" + name() + "]";
+        return "ActionType [" + name() + "]";
     }
 }

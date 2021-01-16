@@ -106,12 +106,8 @@ public abstract class TransportSingleShardAction<Request extends SingleShardRequ
     protected abstract Response shardOperation(Request request, ShardId shardId) throws IOException;
 
     protected void asyncShardOperation(Request request, ShardId shardId, ActionListener<Response> listener) throws IOException {
-        threadPool.executor(getExecutor(request, shardId)).execute(new ActionRunnable<>(listener) {
-            @Override
-            protected void doRun() throws Exception {
-                listener.onResponse(shardOperation(request, shardId));
-            }
-        });
+        threadPool.executor(getExecutor(request, shardId))
+            .execute(ActionRunnable.supply(listener, () -> shardOperation(request, shardId)));
     }
 
     protected abstract Writeable.Reader<Response> getResponseReader();
@@ -187,11 +183,6 @@ public abstract class TransportSingleShardAction<Request extends SingleShardRequ
                     }
 
                     @Override
-                    public String executor() {
-                        return ThreadPool.Names.SAME;
-                    }
-
-                    @Override
                     public void handleResponse(final Response response) {
                         listener.onResponse(response);
                     }
@@ -256,11 +247,6 @@ public abstract class TransportSingleShardAction<Request extends SingleShardRequ
                         }
 
                         @Override
-                        public String executor() {
-                            return ThreadPool.Names.SAME;
-                        }
-
-                        @Override
                         public void handleResponse(final Response response) {
                             listener.onResponse(response);
                         }
@@ -279,7 +265,7 @@ public abstract class TransportSingleShardAction<Request extends SingleShardRequ
         @Override
         public void messageReceived(Request request, final TransportChannel channel, Task task) throws Exception {
             // if we have a local operation, execute it on a thread since we don't spawn
-            execute(request, new ChannelActionListener<>(channel, actionName, request));
+            execute(task, request, new ChannelActionListener<>(channel, actionName, request));
         }
     }
 

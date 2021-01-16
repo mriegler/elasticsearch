@@ -23,7 +23,6 @@ import org.elasticsearch.action.support.nodes.BaseNodeResponse;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.xcontent.ToXContent.Params;
 import org.elasticsearch.common.xcontent.ToXContentFragment;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 
@@ -32,17 +31,18 @@ import java.util.Map;
 
 public class NodeUsage extends BaseNodeResponse implements ToXContentFragment {
 
-    private long timestamp;
-    private long sinceTime;
-    private Map<String, Long> restUsage;
+    private final long timestamp;
+    private final long sinceTime;
+    private final Map<String, Long> restUsage;
+    private final Map<String, Object> aggregationUsage;
 
-    NodeUsage() {
-    }
-
-    public static NodeUsage readNodeStats(StreamInput in) throws IOException {
-        NodeUsage nodeInfo = new NodeUsage();
-        nodeInfo.readFrom(in);
-        return nodeInfo;
+    @SuppressWarnings("unchecked")
+    public NodeUsage(StreamInput in) throws IOException {
+        super(in);
+        timestamp = in.readLong();
+        sinceTime = in.readLong();
+        restUsage = (Map<String, Long>) in.readGenericValue();
+        aggregationUsage = (Map<String, Object>) in.readGenericValue();
     }
 
     /**
@@ -57,11 +57,13 @@ public class NodeUsage extends BaseNodeResponse implements ToXContentFragment {
      *            a map containing the counts of the number of times each REST
      *            endpoint has been called
      */
-    public NodeUsage(DiscoveryNode node, long timestamp, long sinceTime, Map<String, Long> restUsage) {
+    public NodeUsage(DiscoveryNode node, long timestamp, long sinceTime, Map<String, Long> restUsage,
+                     Map<String, Object> aggregationUsage) {
         super(node);
         this.timestamp = timestamp;
         this.sinceTime = sinceTime;
         this.restUsage = restUsage;
+        this.aggregationUsage = aggregationUsage;
     }
 
     /**
@@ -86,6 +88,14 @@ public class NodeUsage extends BaseNodeResponse implements ToXContentFragment {
         return restUsage;
     }
 
+    /**
+     * @return a map containing the counts of the number of times each REST
+     *         endpoint has been called
+     */
+    public Map<String, Object> getAggregationUsage() {
+        return aggregationUsage;
+    }
+
     @Override
     public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
         builder.field("since", sinceTime);
@@ -93,16 +103,11 @@ public class NodeUsage extends BaseNodeResponse implements ToXContentFragment {
             builder.field("rest_actions");
             builder.map(restUsage);
         }
+        if (aggregationUsage != null) {
+            builder.field("aggregations");
+            builder.map(aggregationUsage);
+        }
         return builder;
-    }
-
-    @SuppressWarnings("unchecked")
-    @Override
-    public void readFrom(StreamInput in) throws IOException {
-        super.readFrom(in);
-        timestamp = in.readLong();
-        sinceTime = in.readLong();
-        restUsage = (Map<String, Long>) in.readGenericValue();
     }
 
     @Override
@@ -111,6 +116,7 @@ public class NodeUsage extends BaseNodeResponse implements ToXContentFragment {
         out.writeLong(timestamp);
         out.writeLong(sinceTime);
         out.writeGenericValue(restUsage);
+        out.writeGenericValue(aggregationUsage);
     }
 
 }

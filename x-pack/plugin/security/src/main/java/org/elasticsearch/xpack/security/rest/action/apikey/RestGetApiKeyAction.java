@@ -12,7 +12,6 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.license.XPackLicenseState;
 import org.elasticsearch.rest.BytesRestResponse;
-import org.elasticsearch.rest.RestController;
 import org.elasticsearch.rest.RestRequest;
 import org.elasticsearch.rest.RestResponse;
 import org.elasticsearch.rest.RestStatus;
@@ -20,17 +19,25 @@ import org.elasticsearch.rest.action.RestBuilderListener;
 import org.elasticsearch.xpack.core.security.action.GetApiKeyAction;
 import org.elasticsearch.xpack.core.security.action.GetApiKeyRequest;
 import org.elasticsearch.xpack.core.security.action.GetApiKeyResponse;
+import org.elasticsearch.xpack.security.rest.action.SecurityBaseRestHandler;
 
 import java.io.IOException;
+import java.util.List;
+
+import static org.elasticsearch.rest.RestRequest.Method.GET;
 
 /**
  * Rest action to get one or more API keys information.
  */
-public final class RestGetApiKeyAction extends ApiKeyBaseRestHandler {
+public final class RestGetApiKeyAction extends SecurityBaseRestHandler {
 
-    public RestGetApiKeyAction(Settings settings, RestController controller, XPackLicenseState licenseState) {
+    public RestGetApiKeyAction(Settings settings, XPackLicenseState licenseState) {
         super(settings, licenseState);
-        controller.registerHandler(RestRequest.Method.GET, "/_security/api_key", this);
+    }
+
+    @Override
+    public List<Route> routes() {
+        return List.of(new Route(GET, "/_security/api_key"));
     }
 
     @Override
@@ -39,7 +46,8 @@ public final class RestGetApiKeyAction extends ApiKeyBaseRestHandler {
         final String apiKeyName = request.param("name");
         final String userName = request.param("username");
         final String realmName = request.param("realm_name");
-        final GetApiKeyRequest getApiKeyRequest = new GetApiKeyRequest(realmName, userName, apiKeyId, apiKeyName);
+        final boolean myApiKeysOnly = request.paramAsBoolean("owner", false);
+        final GetApiKeyRequest getApiKeyRequest = new GetApiKeyRequest(realmName, userName, apiKeyId, apiKeyName, myApiKeysOnly);
         return channel -> client.execute(GetApiKeyAction.INSTANCE, getApiKeyRequest,
                 new RestBuilderListener<GetApiKeyResponse>(channel) {
                     @Override
@@ -52,6 +60,7 @@ public final class RestGetApiKeyAction extends ApiKeyBaseRestHandler {
                         }
                         return new BytesRestResponse(RestStatus.OK, builder);
                     }
+
                 });
     }
 

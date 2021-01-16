@@ -5,17 +5,24 @@
  */
 package org.elasticsearch.xpack.ml.dataframe.process;
 
-import java.util.concurrent.ExecutorService;
+import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsConfig;
 
-public interface AnalyticsProcessFactory {
+import java.util.concurrent.ExecutorService;
+import java.util.function.Consumer;
+
+public interface AnalyticsProcessFactory<ProcessResult> {
 
     /**
      * Create an implementation of {@link AnalyticsProcess}
      *
-     * @param jobId             The job id
+     * @param config                 The data frame analytics config
      * @param analyticsProcessConfig The process configuration
-     * @param executorService   Executor service used to start the async tasks a job needs to operate the analytical process
+     * @param hasState               Whether there is state to restore from
+     * @param executorService        Executor service used to start the async tasks a job needs to operate the analytical process
+     * @param onProcessCrash         Callback to execute if the process stops unexpectedly
      * @return The process
      */
-    AnalyticsProcess createAnalyticsProcess(String jobId, AnalyticsProcessConfig analyticsProcessConfig, ExecutorService executorService);
+    AnalyticsProcess<ProcessResult> createAnalyticsProcess(DataFrameAnalyticsConfig config, AnalyticsProcessConfig analyticsProcessConfig,
+                                                           boolean hasState, ExecutorService executorService,
+                                                           Consumer<String> onProcessCrash);
 }

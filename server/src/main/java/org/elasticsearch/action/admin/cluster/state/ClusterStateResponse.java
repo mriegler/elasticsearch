@@ -19,14 +19,12 @@
 
 package org.elasticsearch.action.admin.cluster.state;
 
-import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionResponse;
 import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.unit.ByteSizeValue;
 
 import java.io.IOException;
 import java.util.Objects;
@@ -40,7 +38,11 @@ public class ClusterStateResponse extends ActionResponse {
     private ClusterState clusterState;
     private boolean waitForTimedOut = false;
 
-    public ClusterStateResponse() {
+    public ClusterStateResponse(StreamInput in) throws IOException {
+        super(in);
+        clusterName = new ClusterName(in);
+        clusterState = in.readOptionalWriteable(innerIn -> ClusterState.readFrom(innerIn, null));
+        waitForTimedOut = in.readBoolean();
     }
 
     public ClusterStateResponse(ClusterName clusterName, ClusterState clusterState, boolean waitForTimedOut) {
@@ -73,24 +75,9 @@ public class ClusterStateResponse extends ActionResponse {
     }
 
     @Override
-    public void readFrom(StreamInput in) throws IOException {
-        super.readFrom(in);
-        clusterName = new ClusterName(in);
-        clusterState = in.readOptionalWriteable(innerIn -> ClusterState.readFrom(innerIn, null));
-        if (in.getVersion().before(Version.V_7_0_0)) {
-            new ByteSizeValue(in);
-        }
-        waitForTimedOut = in.readBoolean();
-    }
-
-    @Override
     public void writeTo(StreamOutput out) throws IOException {
-        super.writeTo(out);
         clusterName.writeTo(out);
         out.writeOptionalWriteable(clusterState);
-        if (out.getVersion().before(Version.V_7_0_0)) {
-            ByteSizeValue.ZERO.writeTo(out);
-        }
         out.writeBoolean(waitForTimedOut);
     }
 

@@ -18,11 +18,10 @@
  */
 package org.elasticsearch.search.lookup;
 
-import org.elasticsearch.index.fielddata.AtomicFieldData;
 import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.index.fielddata.LeafFieldData;
 import org.elasticsearch.index.fielddata.ScriptDocValues;
 import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.test.ESTestCase;
 import org.junit.Before;
 
@@ -44,22 +43,11 @@ public class LeafDocLookupTests extends ESTestCase {
         when(fieldType.name()).thenReturn("field");
         when(fieldType.valueForDisplay(anyObject())).then(returnsFirstArg());
 
-        MapperService mapperService = mock(MapperService.class);
-        when(mapperService.fullName("field")).thenReturn(fieldType);
-        when(mapperService.fullName("alias")).thenReturn(fieldType);
-
         docValues = mock(ScriptDocValues.class);
+        IndexFieldData<?> fieldData = createFieldData(docValues);
 
-        AtomicFieldData atomicFieldData = mock(AtomicFieldData.class);
-        doReturn(docValues).when(atomicFieldData).getScriptValues();
-
-        IndexFieldData<?> fieldData = mock(IndexFieldData.class);
-        when(fieldData.getFieldName()).thenReturn("field");
-        doReturn(atomicFieldData).when(fieldData).load(anyObject());
-
-        docLookup = new LeafDocLookup(mapperService,
-            ignored -> fieldData,
-            null);
+        docLookup = new LeafDocLookup(field -> field.equals("field") || field.equals("alias") ? fieldType : null,
+            ignored -> fieldData, null);
     }
 
     public void testBasicLookup() {
@@ -67,8 +55,19 @@ public class LeafDocLookupTests extends ESTestCase {
         assertEquals(docValues, fetchedDocValues);
     }
 
-    public void testLookupWithFieldAlias() {
+    public void testFieldAliases() {
         ScriptDocValues<?> fetchedDocValues = docLookup.get("alias");
         assertEquals(docValues, fetchedDocValues);
+    }
+
+    private IndexFieldData<?> createFieldData(ScriptDocValues scriptDocValues) {
+        LeafFieldData leafFieldData = mock(LeafFieldData.class);
+        doReturn(scriptDocValues).when(leafFieldData).getScriptValues();
+
+        IndexFieldData<?> fieldData = mock(IndexFieldData.class);
+        when(fieldData.getFieldName()).thenReturn("field");
+        doReturn(leafFieldData).when(fieldData).load(anyObject());
+
+        return fieldData;
     }
 }

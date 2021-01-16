@@ -13,16 +13,17 @@ import org.elasticsearch.action.bulk.BulkAction;
 import org.elasticsearch.action.bulk.BulkRequest;
 import org.elasticsearch.action.bulk.BulkResponse;
 import org.elasticsearch.action.search.SearchAction;
-import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.ParentTaskAssigningClient;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.persistent.AllocatedPersistentTask;
 import org.elasticsearch.persistent.PersistentTaskState;
-import org.elasticsearch.persistent.PersistentTasksCustomMetaData;
+import org.elasticsearch.persistent.PersistentTasksCustomMetadata;
 import org.elasticsearch.persistent.PersistentTasksExecutor;
+import org.elasticsearch.persistent.PersistentTasksService;
 import org.elasticsearch.tasks.TaskId;
+import org.elasticsearch.tasks.TaskManager;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.xpack.core.ClientHelper;
 import org.elasticsearch.xpack.core.indexing.IndexerState;
@@ -33,8 +34,8 @@ import org.elasticsearch.xpack.core.rollup.job.RollupIndexerJobStats;
 import org.elasticsearch.xpack.core.rollup.job.RollupJob;
 import org.elasticsearch.xpack.core.rollup.job.RollupJobConfig;
 import org.elasticsearch.xpack.core.rollup.job.RollupJobStatus;
+import org.elasticsearch.xpack.core.scheduler.CronSchedule;
 import org.elasticsearch.xpack.core.scheduler.SchedulerEngine;
-import org.elasticsearch.xpack.rollup.Rollup;
 
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -56,7 +57,7 @@ public class RollupJobTask extends AllocatedPersistentTask implements SchedulerE
         private final ThreadPool threadPool;
 
         public RollupJobPersistentTasksExecutor(Client client, SchedulerEngine schedulerEngine, ThreadPool threadPool) {
-            super(RollupField.TASK_NAME, Rollup.TASK_THREAD_POOL_NAME);
+            super(RollupField.TASK_NAME, ThreadPool.Names.GENERIC);
             this.client = client;
             this.schedulerEngine = schedulerEngine;
             this.threadPool = threadPool;
@@ -78,7 +79,7 @@ public class RollupJobTask extends AllocatedPersistentTask implements SchedulerE
 
         @Override
         protected AllocatedPersistentTask createTask(long id, String type, String action, TaskId parentTaskId,
-                                                     PersistentTasksCustomMetaData.PersistentTask<RollupJob> persistentTask,
+                                                     PersistentTasksCustomMetadata.PersistentTask<RollupJob> persistentTask,
                                                      Map<String, String> headers) {
             return new RollupJobTask(id, type, action, parentTaskId, persistentTask.getParams(),
                     (RollupJobStatus) persistentTask.getState(), client, schedulerEngine, threadPool, headers);
@@ -99,15 +100,15 @@ public class RollupJobTask extends AllocatedPersistentTask implements SchedulerE
 
         ClientRollupPageManager(RollupJob job, IndexerState initialState, Map<String, Object> initialPosition,
                                 Client client) {
-            super(threadPool.executor(ThreadPool.Names.GENERIC), job, new AtomicReference<>(initialState), initialPosition);
+            super(threadPool, job, new AtomicReference<>(initialState), initialPosition);
             this.client = client;
             this.job = job;
         }
 
         @Override
-        protected void doNextSearch(SearchRequest request, ActionListener<SearchResponse> nextPhase) {
-            ClientHelper.executeWithHeadersAsync(job.getHeaders(), ClientHelper.ROLLUP_ORIGIN, client, SearchAction.INSTANCE, request,
-                    nextPhase);
+        protected void doNextSearch(long waitTimeInNanos, ActionListener<SearchResponse> nextPhase) {
+            ClientHelper.executeWithHeadersAsync(job.getHeaders(), ClientHelper.ROLLUP_ORIGIN, client, SearchAction.INSTANCE,
+                    buildSearchRequest(), nextPhase);
         }
 
         @Override
@@ -149,7 +150,10 @@ public class RollupJobTask extends AllocatedPersistentTask implements SchedulerE
     private final RollupJob job;
     private final SchedulerEngine schedulerEngine;
     private final ThreadPool threadPool;
-    private final RollupIndexer indexer;
+    private final Client client;
+    private final IndexerState initialIndexerState;
+    private final Map<String, Object> initialPosition;
+    private RollupIndexer indexer;
 
     RollupJobTask(long id, String type, String action, TaskId parentTask, RollupJob job, RollupJobStatus state,
                   Client client, SchedulerEngine schedulerEngine, ThreadPool threadPool, Map<String, String> headers) {
@@ -157,36 +161,48 @@ public class RollupJobTask extends AllocatedPersistentTask implements SchedulerE
         this.job = job;
         this.schedulerEngine = schedulerEngine;
         this.threadPool = threadPool;
+        this.client = client;
+        if (state == null) {
+            this.initialIndexerState = null;
+            this.initialPosition = null;
+        } else {
+            this.initialIndexerState = state.getIndexerState();
+            this.initialPosition = state.getPosition();
+        }
 
-        // If status is not null, we are resuming rather than starting fresh.
-        Map<String, Object> initialPosition = null;
-        IndexerState initialState = IndexerState.STOPPED;
-        if (state != null) {
-            final IndexerState existingState = state.getIndexerState();
-            logger.debug("We have existing state, setting state to [" + existingState + "] " +
-                    "and current position to [" + state.getPosition() + "] for job [" + job.getConfig().getId() + "]");
-            if (existingState.equals(IndexerState.INDEXING)) {
+    }
+
+    @Override
+    protected void init(PersistentTasksService persistentTasksService, TaskManager taskManager,
+                        String persistentTaskId, long allocationId) {
+        super.init(persistentTasksService, taskManager, persistentTaskId, allocationId);
+
+        // If initial position is not null, we are resuming rather than starting fresh.
+        IndexerState indexerState = IndexerState.STOPPED;
+        if (initialIndexerState != null) {
+            logger.debug("We have existing state, setting state to [" + initialIndexerState + "] " +
+                "and current position to [" + initialPosition + "] for job [" + job.getConfig().getId() + "]");
+            if (initialIndexerState.equals(IndexerState.INDEXING)) {
                 /*
                  * If we were indexing, we have to reset back to STARTED otherwise the indexer will be "stuck" thinking
                  * it is indexing but without the actual indexing thread running.
                  */
-                initialState = IndexerState.STARTED;
+                indexerState = IndexerState.STARTED;
 
-            } else if (existingState.equals(IndexerState.ABORTING) || existingState.equals(IndexerState.STOPPING)) {
+            } else if (initialIndexerState.equals(IndexerState.ABORTING) || initialIndexerState.equals(IndexerState.STOPPING)) {
                 // It shouldn't be possible to persist ABORTING, but if for some reason it does,
                 // play it safe and restore the job as STOPPED.  An admin will have to clean it up,
                 // but it won't be running, and won't delete itself either.  Safest option.
                 // If we were STOPPING, that means it persisted but was killed before finally stopped... so ok
                 // to restore as STOPPED
-                initialState = IndexerState.STOPPED;
+                indexerState = IndexerState.STOPPED;
             } else  {
-                initialState = existingState;
+                indexerState = initialIndexerState;
             }
-            initialPosition = state.getPosition();
 
         }
-        this.indexer = new ClientRollupPageManager(job, initialState, initialPosition,
-                new ParentTaskAssigningClient(client, new TaskId(getPersistentTaskId())));
+        this.indexer = new ClientRollupPageManager(job, indexerState, initialPosition,
+            new ParentTaskAssigningClient(client, getParentTaskId()));
     }
 
     @Override

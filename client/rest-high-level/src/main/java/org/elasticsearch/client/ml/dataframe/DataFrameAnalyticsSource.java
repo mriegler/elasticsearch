@@ -26,8 +26,11 @@ import org.elasticsearch.common.xcontent.ObjectParser;
 import org.elasticsearch.common.xcontent.ToXContentObject;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.search.fetch.subphase.FetchSourceContext;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Objects;
 
 public class DataFrameAnalyticsSource implements ToXContentObject {
@@ -42,28 +45,39 @@ public class DataFrameAnalyticsSource implements ToXContentObject {
 
     private static final ParseField INDEX = new ParseField("index");
     private static final ParseField QUERY = new ParseField("query");
+    public static final ParseField _SOURCE = new ParseField("_source");
 
-    private static ObjectParser<Builder, Void> PARSER = new ObjectParser<>("data_frame_analytics_source", true, Builder::new);
+    private static final ObjectParser<Builder, Void> PARSER = new ObjectParser<>("data_frame_analytics_source", true, Builder::new);
 
     static {
-        PARSER.declareString(Builder::setIndex, INDEX);
+        PARSER.declareStringArray(Builder::setIndex, INDEX);
         PARSER.declareObject(Builder::setQueryConfig, (p, c) -> QueryConfig.fromXContent(p), QUERY);
+        PARSER.declareField(Builder::setSourceFiltering,
+            (p, c) -> FetchSourceContext.fromXContent(p),
+            _SOURCE,
+            ObjectParser.ValueType.OBJECT_ARRAY_BOOLEAN_OR_STRING);
     }
 
-    private final String index;
+    private final String[] index;
     private final QueryConfig queryConfig;
+    private final FetchSourceContext sourceFiltering;
 
-    private DataFrameAnalyticsSource(String index, @Nullable QueryConfig queryConfig) {
+    private DataFrameAnalyticsSource(String[] index, @Nullable QueryConfig queryConfig, @Nullable FetchSourceContext sourceFiltering) {
         this.index = Objects.requireNonNull(index);
         this.queryConfig = queryConfig;
+        this.sourceFiltering = sourceFiltering;
     }
 
-    public String getIndex() {
+    public String[] getIndex() {
         return index;
     }
 
     public QueryConfig getQueryConfig() {
         return queryConfig;
+    }
+
+    public FetchSourceContext getSourceFiltering() {
+        return sourceFiltering;
     }
 
     @Override
@@ -72,6 +86,9 @@ public class DataFrameAnalyticsSource implements ToXContentObject {
         builder.field(INDEX.getPreferredName(), index);
         if (queryConfig != null) {
             builder.field(QUERY.getPreferredName(), queryConfig.getQuery());
+        }
+        if (sourceFiltering != null) {
+            builder.field(_SOURCE.getPreferredName(), sourceFiltering);
         }
         builder.endObject();
         return builder;
@@ -83,13 +100,14 @@ public class DataFrameAnalyticsSource implements ToXContentObject {
         if (o == null || getClass() != o.getClass()) return false;
 
         DataFrameAnalyticsSource other = (DataFrameAnalyticsSource) o;
-        return Objects.equals(index, other.index)
-            && Objects.equals(queryConfig, other.queryConfig);
+        return Arrays.equals(index, other.index)
+            && Objects.equals(queryConfig, other.queryConfig)
+            && Objects.equals(sourceFiltering, other.sourceFiltering);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(index, queryConfig);
+        return Objects.hash(Arrays.asList(index), queryConfig, sourceFiltering);
     }
 
     @Override
@@ -99,13 +117,19 @@ public class DataFrameAnalyticsSource implements ToXContentObject {
 
     public static class Builder {
 
-        private String index;
+        private String[] index;
         private QueryConfig queryConfig;
+        private FetchSourceContext sourceFiltering;
 
         private Builder() {}
 
-        public Builder setIndex(String index) {
+        public Builder setIndex(String... index) {
             this.index = index;
+            return this;
+        }
+
+        public Builder setIndex(List<String> index) {
+            this.index = index.toArray(new String[0]);
             return this;
         }
 
@@ -114,8 +138,13 @@ public class DataFrameAnalyticsSource implements ToXContentObject {
             return this;
         }
 
+        public Builder setSourceFiltering(FetchSourceContext sourceFiltering) {
+            this.sourceFiltering = sourceFiltering;
+            return this;
+        }
+
         public DataFrameAnalyticsSource build() {
-            return new DataFrameAnalyticsSource(index, queryConfig);
+            return new DataFrameAnalyticsSource(index, queryConfig, sourceFiltering);
         }
     }
 }

@@ -60,7 +60,6 @@ public class GetSettingsRequest extends MasterNodeReadRequest<GetSettingsRequest
         return this;
     }
 
-
     public GetSettingsRequest() {
     }
 
@@ -93,6 +92,11 @@ public class GetSettingsRequest extends MasterNodeReadRequest<GetSettingsRequest
         return indicesOptions;
     }
 
+    @Override
+    public boolean includeDataStreams() {
+        return true;
+    }
+
     public String[] names() {
         return names;
     }
@@ -122,11 +126,6 @@ public class GetSettingsRequest extends MasterNodeReadRequest<GetSettingsRequest
             validationException = ValidateActions.addValidationError("names may not be null", validationException);
         }
         return validationException;
-    }
-
-    @Override
-    public void readFrom(StreamInput in) throws IOException {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
     }
 
     @Override

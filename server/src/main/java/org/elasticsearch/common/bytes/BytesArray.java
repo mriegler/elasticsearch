@@ -20,8 +20,14 @@
 package org.elasticsearch.common.bytes;
 
 import org.apache.lucene.util.BytesRef;
+import org.elasticsearch.common.io.stream.StreamInput;
 
-public final class BytesArray extends BytesReference {
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.Arrays;
+import java.util.Objects;
+
+public final class BytesArray extends AbstractBytesReference {
 
     public static final BytesArray EMPTY = new BytesArray(BytesRef.EMPTY_BYTES, 0, 0);
     private final byte[] bytes;
@@ -66,11 +72,29 @@ public final class BytesArray extends BytesReference {
     }
 
     @Override
-    public BytesReference slice(int from, int length) {
-        if (from < 0 || (from + length) > this.length) {
-            throw new IllegalArgumentException("can't slice a buffer with length [" + this.length +
-                "], with slice parameters from [" + from + "], length [" + length + "]");
+    public int hashCode() {
+        // NOOP override to satisfy Checkstyle's EqualsHashCode
+        return super.hashCode();
+    }
+
+    @Override
+    public boolean equals(Object other) {
+        if (this == other) {
+            return true;
         }
+        if (other instanceof BytesArray) {
+            final BytesArray that = (BytesArray) other;
+            return Arrays.equals(bytes, offset, offset + length, that.bytes, that.offset, that.offset + that.length);
+        }
+        return super.equals(other);
+    }
+
+    @Override
+    public BytesReference slice(int from, int length) {
+        if (from == 0 && this.length == length) {
+            return this;
+        }
+        Objects.checkFromIndexSize(from, length, this.length);
         return new BytesArray(bytes, offset + from, length);
     }
 
@@ -92,4 +116,13 @@ public final class BytesArray extends BytesReference {
         return bytes.length;
     }
 
+    @Override
+    public StreamInput streamInput() {
+        return StreamInput.wrap(bytes, offset, length);
+    }
+
+    @Override
+    public void writeTo(OutputStream os) throws IOException {
+        os.write(bytes, offset, length);
+    }
 }

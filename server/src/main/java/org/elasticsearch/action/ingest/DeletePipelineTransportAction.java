@@ -22,20 +22,18 @@ package org.elasticsearch.action.ingest;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
-import org.elasticsearch.action.support.master.TransportMasterNodeAction;
+import org.elasticsearch.action.support.master.AcknowledgedTransportMasterNodeAction;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.ingest.IngestService;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
-import java.io.IOException;
-
-public class DeletePipelineTransportAction extends TransportMasterNodeAction<DeletePipelineRequest, AcknowledgedResponse> {
+public class DeletePipelineTransportAction extends AcknowledgedTransportMasterNodeAction<DeletePipelineRequest> {
 
     private final IngestService ingestService;
 
@@ -43,28 +41,13 @@ public class DeletePipelineTransportAction extends TransportMasterNodeAction<Del
     public DeletePipelineTransportAction(ThreadPool threadPool, IngestService ingestService, TransportService transportService,
                                          ActionFilters actionFilters, IndexNameExpressionResolver indexNameExpressionResolver) {
         super(DeletePipelineAction.NAME, transportService, ingestService.getClusterService(),
-            threadPool, actionFilters, indexNameExpressionResolver, DeletePipelineRequest::new);
+            threadPool, actionFilters, DeletePipelineRequest::new, indexNameExpressionResolver, ThreadPool.Names.SAME);
         this.ingestService = ingestService;
     }
 
     @Override
-    protected String executor() {
-        return ThreadPool.Names.SAME;
-    }
-
-    @Override
-    protected AcknowledgedResponse read(StreamInput in) throws IOException {
-        return new AcknowledgedResponse(in);
-    }
-
-    @Override
-    protected AcknowledgedResponse newResponse() {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
-    }
-
-    @Override
-    protected void masterOperation(DeletePipelineRequest request, ClusterState state,
-        ActionListener<AcknowledgedResponse> listener) throws Exception {
+    protected void masterOperation(Task task, DeletePipelineRequest request, ClusterState state,
+                                   ActionListener<AcknowledgedResponse> listener) throws Exception {
         ingestService.delete(request, listener);
     }
 

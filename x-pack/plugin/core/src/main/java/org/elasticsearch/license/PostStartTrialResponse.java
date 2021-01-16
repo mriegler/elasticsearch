@@ -15,9 +15,9 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 
-class PostStartTrialResponse extends ActionResponse {
+public class PostStartTrialResponse extends ActionResponse {
 
-    enum Status {
+    public enum Status {
         UPGRADED_TO_TRIAL(true, null, RestStatus.OK),
         TRIAL_ALREADY_ACTIVATED(false, "Operation failed: Trial was already activated.", RestStatus.FORBIDDEN),
         NEED_ACKNOWLEDGEMENT(false,"Operation failed: Needs acknowledgement.", RestStatus.OK);
@@ -50,25 +50,8 @@ class PostStartTrialResponse extends ActionResponse {
     private Map<String, String[]> acknowledgeMessages;
     private String acknowledgeMessage;
 
-    PostStartTrialResponse() {
-    }
-
-    PostStartTrialResponse(Status status) {
-        this(status, Collections.emptyMap(), null);
-    }
-
-    PostStartTrialResponse(Status status, Map<String, String[]> acknowledgeMessages, String acknowledgeMessage) {
-        this.status = status;
-        this.acknowledgeMessages = acknowledgeMessages;
-        this.acknowledgeMessage = acknowledgeMessage;
-    }
-
-    public Status getStatus() {
-        return status;
-    }
-
-    @Override
-    public void readFrom(StreamInput in) throws IOException {
+    PostStartTrialResponse(StreamInput in) throws IOException {
+        super(in);
         status = in.readEnum(Status.class);
         acknowledgeMessage = in.readOptionalString();
         int size = in.readVInt();
@@ -83,6 +66,20 @@ class PostStartTrialResponse extends ActionResponse {
             acknowledgeMessages.put(feature, messages);
         }
         this.acknowledgeMessages = acknowledgeMessages;
+    }
+
+    PostStartTrialResponse(Status status) {
+        this(status, Collections.emptyMap(), null);
+    }
+
+    PostStartTrialResponse(Status status, Map<String, String[]> acknowledgeMessages, String acknowledgeMessage) {
+        this.status = status;
+        this.acknowledgeMessages = acknowledgeMessages;
+        this.acknowledgeMessage = acknowledgeMessage;
+    }
+
+    public Status getStatus() {
+        return status;
     }
 
     @Override

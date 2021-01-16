@@ -28,7 +28,7 @@ import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryRewriteContext;
-import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.SearchExecutionContext;
 import org.elasticsearch.search.rescore.QueryRescorer.QueryRescoreContext;
 
 import java.io.IOException;
@@ -45,7 +45,7 @@ public class QueryRescorerBuilder extends RescorerBuilder<QueryRescorerBuilder> 
     private static final ParseField RESCORE_QUERY_WEIGHT_FIELD = new ParseField("rescore_query_weight");
     private static final ParseField SCORE_MODE_FIELD = new ParseField("score_mode");
 
-    private static final ObjectParser<InnerBuilder, Void> QUERY_RESCORE_PARSER = new ObjectParser<>(NAME, null);
+    private static final ObjectParser<InnerBuilder, Void> QUERY_RESCORE_PARSER = new ObjectParser<>(NAME);
     static {
         QUERY_RESCORE_PARSER.declareObject(InnerBuilder::setQueryBuilder, (p, c) -> {
             try {
@@ -171,7 +171,7 @@ public class QueryRescorerBuilder extends RescorerBuilder<QueryRescorerBuilder> 
     }
 
     @Override
-    public QueryRescoreContext innerBuildContext(int windowSize, QueryShardContext context) throws IOException {
+    public QueryRescoreContext innerBuildContext(int windowSize, SearchExecutionContext context) throws IOException {
         QueryRescoreContext queryRescoreContext = new QueryRescoreContext(windowSize);
         // query is rewritten at this point already
         queryRescoreContext.setQuery(queryBuilder.toQuery(context));

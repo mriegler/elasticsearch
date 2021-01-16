@@ -6,13 +6,12 @@
 package org.elasticsearch.xpack.core.ml.action;
 
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.action.Action;
-import org.elasticsearch.action.ActionRequestBuilder;
+import org.elasticsearch.Version;
 import org.elasticsearch.action.ActionRequestValidationException;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.TaskOperationFailure;
 import org.elasticsearch.action.support.tasks.BaseTasksRequest;
 import org.elasticsearch.action.support.tasks.BaseTasksResponse;
-import org.elasticsearch.client.ElasticsearchClient;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.ParseField;
@@ -27,38 +26,34 @@ import org.elasticsearch.xpack.core.action.util.PageParams;
 import org.elasticsearch.xpack.core.action.util.QueryPage;
 import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsConfig;
 import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsState;
+import org.elasticsearch.xpack.core.ml.dataframe.stats.AnalysisStats;
+import org.elasticsearch.xpack.core.ml.dataframe.stats.common.MemoryUsage;
+import org.elasticsearch.xpack.core.ml.dataframe.stats.common.DataCounts;
 import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
+import org.elasticsearch.xpack.core.ml.utils.PhaseProgress;
+import org.elasticsearch.xpack.core.ml.utils.ToXContentParams;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyticsStatsAction.Response> {
+public class GetDataFrameAnalyticsStatsAction extends ActionType<GetDataFrameAnalyticsStatsAction.Response> {
 
     public static final GetDataFrameAnalyticsStatsAction INSTANCE = new GetDataFrameAnalyticsStatsAction();
     public static final String NAME = "cluster:monitor/xpack/ml/data_frame/analytics/stats/get";
 
     private GetDataFrameAnalyticsStatsAction() {
-        super(NAME);
-    }
-
-    @Override
-    public Response newResponse() {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
-    }
-
-    @Override
-    public Writeable.Reader<Response> getResponseReader() {
-        return Response::new;
+        super(NAME, GetDataFrameAnalyticsStatsAction.Response::new);
     }
 
     public static class Request extends BaseTasksRequest<Request> {
 
         public static final ParseField ALLOW_NO_MATCH = new ParseField("allow_no_match");
 
-        private String id;
+        private String id = "_all";
         private boolean allowNoMatch = true;
         private PageParams pageParams = PageParams.defaultParams();
 
@@ -98,7 +93,7 @@ public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyti
         }
 
         public void setId(String id) {
-            this.id = id;
+            this.id = ExceptionsHelper.requireNonNull(id, DataFrameAnalyticsConfig.ID.getPreferredName());
         }
 
         public String getId() {
@@ -145,35 +140,51 @@ public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyti
                 return false;
             }
             Request other = (Request) obj;
-            return Objects.equals(id, other.id) && allowNoMatch == other.allowNoMatch && Objects.equals(pageParams, other.pageParams);
-        }
-    }
-
-    public static class RequestBuilder extends ActionRequestBuilder<Request, Response> {
-
-        public RequestBuilder(ElasticsearchClient client, GetDataFrameAnalyticsStatsAction action) {
-            super(client, action, new Request());
+            return Objects.equals(id, other.id)
+                && allowNoMatch == other.allowNoMatch
+                && Objects.equals(pageParams, other.pageParams);
         }
     }
 
     public static class Response extends BaseTasksResponse implements ToXContentObject {
+
+        /** Name of the response's REST param which is used to determine whether this response should be verbose. */
+        public static final String VERBOSE = "verbose";
 
         public static class Stats implements ToXContentObject, Writeable {
 
             private final String id;
             private final DataFrameAnalyticsState state;
             @Nullable
-            private final Integer progressPercentage;
+            private final String failureReason;
+
+            /**
+             * The progress is described as a list of each phase and its completeness percentage.
+             */
+            private final List<PhaseProgress> progress;
+
+            private final DataCounts dataCounts;
+
+            private final MemoryUsage memoryUsage;
+
+            @Nullable
+            private final AnalysisStats analysisStats;
+
             @Nullable
             private final DiscoveryNode node;
             @Nullable
             private final String assignmentExplanation;
 
-            public Stats(String id, DataFrameAnalyticsState state, @Nullable Integer progressPercentage,
+            public Stats(String id, DataFrameAnalyticsState state, @Nullable String failureReason, List<PhaseProgress> progress,
+                         @Nullable DataCounts dataCounts, @Nullable MemoryUsage memoryUsage, @Nullable AnalysisStats analysisStats,
                          @Nullable DiscoveryNode node, @Nullable String assignmentExplanation) {
                 this.id = Objects.requireNonNull(id);
                 this.state = Objects.requireNonNull(state);
-                this.progressPercentage = progressPercentage;
+                this.failureReason = failureReason;
+                this.progress = Objects.requireNonNull(progress);
+                this.dataCounts = dataCounts == null ? new DataCounts(id) : dataCounts;
+                this.memoryUsage = memoryUsage == null ? new MemoryUsage(id) : memoryUsage;
+                this.analysisStats = analysisStats;
                 this.node = node;
                 this.assignmentExplanation = assignmentExplanation;
             }
@@ -181,9 +192,62 @@ public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyti
             public Stats(StreamInput in) throws IOException {
                 id = in.readString();
                 state = DataFrameAnalyticsState.fromStream(in);
-                progressPercentage = in.readOptionalInt();
+                failureReason = in.readOptionalString();
+                if (in.getVersion().before(Version.V_7_4_0)) {
+                    progress = readProgressFromLegacy(state, in);
+                } else {
+                    progress = in.readList(PhaseProgress::new);
+                }
+                if (in.getVersion().onOrAfter(Version.V_7_7_0)) {
+                    dataCounts = new DataCounts(in);
+                } else {
+                    dataCounts = null;
+                }
+                if (in.getVersion().onOrAfter(Version.V_7_7_0)) {
+                    memoryUsage = new MemoryUsage(in);
+                } else {
+                    memoryUsage = null;
+                }
+                if (in.getVersion().onOrAfter(Version.V_7_7_0)) {
+                    analysisStats = in.readOptionalNamedWriteable(AnalysisStats.class);
+                } else {
+                    analysisStats = null;
+                }
                 node = in.readOptionalWriteable(DiscoveryNode::new);
                 assignmentExplanation = in.readOptionalString();
+            }
+
+            private static List<PhaseProgress> readProgressFromLegacy(DataFrameAnalyticsState state, StreamInput in) throws IOException {
+                Integer legacyProgressPercent = in.readOptionalInt();
+                if (legacyProgressPercent == null) {
+                    return Collections.emptyList();
+                }
+
+                int reindexingProgress = 0;
+                int loadingDataProgress = 0;
+                int analyzingProgress = 0;
+                switch (state) {
+                    case ANALYZING:
+                        reindexingProgress = 100;
+                        loadingDataProgress = 100;
+                        analyzingProgress = legacyProgressPercent;
+                        break;
+                    case REINDEXING:
+                        reindexingProgress = legacyProgressPercent;
+                        break;
+                    case STARTING:
+                    case STARTED:
+                    case STOPPED:
+                    case STOPPING:
+                    default:
+                        return null;
+                }
+
+                return Arrays.asList(
+                    new PhaseProgress("reindexing", reindexingProgress),
+                    new PhaseProgress("loading_data", loadingDataProgress),
+                    new PhaseProgress("analyzing", analyzingProgress),
+                    new PhaseProgress("writing_results", 0));
             }
 
             public String getId() {
@@ -194,21 +258,65 @@ public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyti
                 return state;
             }
 
+            public String getFailureReason() {
+                return failureReason;
+            }
+
+            public List<PhaseProgress> getProgress() {
+                return progress;
+            }
+
+            @Nullable
+            public DataCounts getDataCounts() {
+                return dataCounts;
+            }
+
+            public MemoryUsage getMemoryUsage() {
+                return memoryUsage;
+            }
+
+            public AnalysisStats getAnalysisStats() {
+                return analysisStats;
+            }
+
+            public DiscoveryNode getNode() {
+                return node;
+            }
+
+            public String getAssignmentExplanation() {
+                return assignmentExplanation;
+            }
+
             @Override
             public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
                 // TODO: Have callers wrap the content with an object as they choose rather than forcing it upon them
                 builder.startObject();
                 {
-                    toUnwrappedXContent(builder);
+                    toUnwrappedXContent(builder, params);
                 }
                 return builder.endObject();
             }
 
-            public XContentBuilder toUnwrappedXContent(XContentBuilder builder) throws IOException {
+            private XContentBuilder toUnwrappedXContent(XContentBuilder builder, Params params) throws IOException {
                 builder.field(DataFrameAnalyticsConfig.ID.getPreferredName(), id);
                 builder.field("state", state.toString());
-                if (progressPercentage != null) {
-                    builder.field("progress_percent", progressPercentage);
+                if (failureReason != null) {
+                    builder.field("failure_reason", failureReason);
+                }
+                if (progress != null) {
+                    builder.field("progress", progress);
+                }
+                builder.field("data_counts", dataCounts);
+                builder.field("memory_usage", memoryUsage);
+                if (analysisStats != null) {
+                    builder.startObject("analysis_stats");
+                    builder.field(
+                        analysisStats.getWriteableName(),
+                        analysisStats,
+                        new MapParams(
+                            Collections.singletonMap(
+                                ToXContentParams.FOR_INTERNAL_STORAGE, Boolean.toString(params.paramAsBoolean(VERBOSE, false)))));
+                    builder.endObject();
                 }
                 if (node != null) {
                     builder.startObject("node");
@@ -234,14 +342,55 @@ public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyti
             public void writeTo(StreamOutput out) throws IOException {
                 out.writeString(id);
                 state.writeTo(out);
-                out.writeOptionalInt(progressPercentage);
+                out.writeOptionalString(failureReason);
+                if (out.getVersion().before(Version.V_7_4_0)) {
+                    writeProgressToLegacy(out);
+                } else {
+                    out.writeList(progress);
+                }
+                if (out.getVersion().onOrAfter(Version.V_7_7_0)) {
+                    dataCounts.writeTo(out);
+                }
+                if (out.getVersion().onOrAfter(Version.V_7_7_0)) {
+                    memoryUsage.writeTo(out);
+                }
+                if (out.getVersion().onOrAfter(Version.V_7_7_0)) {
+                    out.writeOptionalNamedWriteable(analysisStats);
+                }
                 out.writeOptionalWriteable(node);
                 out.writeOptionalString(assignmentExplanation);
             }
 
+            private void writeProgressToLegacy(StreamOutput out) throws IOException {
+                String targetPhase = null;
+                switch (state) {
+                    case ANALYZING:
+                        targetPhase = "analyzing";
+                        break;
+                    case REINDEXING:
+                        targetPhase = "reindexing";
+                        break;
+                    case STARTING:
+                    case STARTED:
+                    case STOPPED:
+                    case STOPPING:
+                    default:
+                        break;
+                }
+
+                Integer legacyProgressPercent = null;
+                for (PhaseProgress phaseProgress : progress) {
+                    if (phaseProgress.getPhase().equals(targetPhase)) {
+                        legacyProgressPercent = phaseProgress.getProgressPercent();
+                    }
+                }
+                out.writeOptionalInt(legacyProgressPercent);
+            }
+
             @Override
             public int hashCode() {
-                return Objects.hash(id, state, progressPercentage, node, assignmentExplanation);
+                return Objects.hash(id, state, failureReason, progress, dataCounts, memoryUsage, analysisStats, node,
+                    assignmentExplanation);
             }
 
             @Override
@@ -255,6 +404,11 @@ public class GetDataFrameAnalyticsStatsAction extends Action<GetDataFrameAnalyti
                 Stats other = (Stats) obj;
                 return Objects.equals(id, other.id)
                         && Objects.equals(this.state, other.state)
+                        && Objects.equals(this.failureReason, other.failureReason)
+                        && Objects.equals(this.progress, other.progress)
+                        && Objects.equals(this.dataCounts, other.dataCounts)
+                        && Objects.equals(this.memoryUsage, other.memoryUsage)
+                        && Objects.equals(this.analysisStats, other.analysisStats)
                         && Objects.equals(this.node, other.node)
                         && Objects.equals(this.assignmentExplanation, other.assignmentExplanation);
             }

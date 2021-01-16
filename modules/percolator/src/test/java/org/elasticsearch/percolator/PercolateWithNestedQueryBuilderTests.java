@@ -26,7 +26,7 @@ import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.query.QueryBuilder;
-import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.SearchExecutionContext;
 
 import java.io.IOException;
 
@@ -35,23 +35,23 @@ public class PercolateWithNestedQueryBuilderTests extends PercolateQueryBuilderT
     @Override
     protected void initializeAdditionalMappings(MapperService mapperService) throws IOException {
         super.initializeAdditionalMappings(mapperService);
-        mapperService.merge("_doc", new CompressedXContent(Strings.toString(PutMappingRequest.buildFromSimplifiedDef(
-                "_doc", "some_nested_object", "type=nested"))), MapperService.MergeReason.MAPPING_UPDATE);
+        mapperService.merge("_doc", new CompressedXContent(Strings.toString(PutMappingRequest.simpleMapping(
+                "some_nested_object", "type=nested"))), MapperService.MergeReason.MAPPING_UPDATE);
     }
 
     public void testDetectsNestedDocuments() throws IOException {
-        QueryShardContext shardContext = createShardContext();
+        SearchExecutionContext searchExecutionContext = createSearchExecutionContext();
 
         PercolateQueryBuilder builder = new PercolateQueryBuilder(queryField,
                 new BytesArray("{ \"foo\": \"bar\" }"), XContentType.JSON);
-        QueryBuilder rewrittenBuilder = rewriteAndFetch(builder, shardContext);
-        PercolateQuery query = (PercolateQuery) rewrittenBuilder.toQuery(shardContext);
+        QueryBuilder rewrittenBuilder = rewriteAndFetch(builder, searchExecutionContext);
+        PercolateQuery query = (PercolateQuery) rewrittenBuilder.toQuery(searchExecutionContext);
         assertFalse(query.excludesNestedDocs());
 
         builder = new PercolateQueryBuilder(queryField,
                 new BytesArray("{ \"foo\": \"bar\", \"some_nested_object\": [ { \"baz\": 42 } ] }"), XContentType.JSON);
-        rewrittenBuilder = rewriteAndFetch(builder, shardContext);
-        query = (PercolateQuery) rewrittenBuilder.toQuery(shardContext);
+        rewrittenBuilder = rewriteAndFetch(builder, searchExecutionContext);
+        query = (PercolateQuery) rewrittenBuilder.toQuery(searchExecutionContext);
         assertTrue(query.excludesNestedDocs());
     }
 }

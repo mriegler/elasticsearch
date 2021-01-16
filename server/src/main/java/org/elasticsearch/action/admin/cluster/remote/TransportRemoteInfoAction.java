@@ -23,12 +23,11 @@ import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.search.SearchTransportService;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
+import org.elasticsearch.cluster.node.DiscoveryNodeRole;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.tasks.Task;
 import org.elasticsearch.transport.RemoteClusterService;
 import org.elasticsearch.transport.TransportService;
-
-import java.util.function.Supplier;
 
 import static java.util.stream.Collectors.toList;
 
@@ -39,13 +38,16 @@ public final class TransportRemoteInfoAction extends HandledTransportAction<Remo
     @Inject
     public TransportRemoteInfoAction(TransportService transportService, ActionFilters actionFilters,
                                      SearchTransportService searchTransportService) {
-        super(RemoteInfoAction.NAME, transportService, actionFilters,
-            (Supplier<RemoteInfoRequest>) RemoteInfoRequest::new);
+        super(RemoteInfoAction.NAME, transportService, actionFilters, RemoteInfoRequest::new);
         this.remoteClusterService = searchTransportService.getRemoteClusterService();
     }
 
     @Override
     protected void doExecute(Task task, RemoteInfoRequest remoteInfoRequest, ActionListener<RemoteInfoResponse> listener) {
+        if (remoteClusterService.isEnabled() == false) {
+            throw new IllegalArgumentException("node [" + remoteClusterService.getLocalNode().getName() +
+                "] does not have the [" + DiscoveryNodeRole.REMOTE_CLUSTER_CLIENT_ROLE.roleName() + "] role");
+        }
         listener.onResponse(new RemoteInfoResponse(remoteClusterService.getRemoteConnectionInfos().collect(toList())));
     }
 }

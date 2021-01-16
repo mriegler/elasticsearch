@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.IntFunction;
 
+import static org.hamcrest.Matchers.is;
+
 public class SSLDriverTests extends ESTestCase {
 
     private final IntFunction<Page> pageAllocator = (n) -> new Page(ByteBuffer.allocate(n), () -> {});
@@ -38,6 +40,7 @@ public class SSLDriverTests extends ESTestCase {
     private final AtomicInteger openPages = new AtomicInteger(0);
 
     public void testPingPongAndClose() throws Exception {
+        assumeFalse("Fails in normalClose as receiveDriver.getOutboundBuffer().hasEncryptedBytesToFlush() is false", inFipsJvm());
         SSLContext sslContext = getSSLContext();
 
         SSLDriver clientDriver = getDriver(sslContext.createSSLEngine(), true);
@@ -76,6 +79,8 @@ public class SSLDriverTests extends ESTestCase {
     }
 
     public void testRenegotiate() throws Exception {
+        assumeFalse("BCTLS doesn't support renegotiation: https://github.com/bcgit/bc-java/issues/593#issuecomment-533518845",
+            inFipsJvm());
         SSLContext sslContext = getSSLContext();
 
         SSLEngine serverEngine = sslContext.createSSLEngine();
@@ -121,6 +126,7 @@ public class SSLDriverTests extends ESTestCase {
     }
 
     public void testBigApplicationData() throws Exception {
+        assumeFalse("Fails in normalClose as receiveDriver.getOutboundBuffer().hasEncryptedBytesToFlush() is false", inFipsJvm());
         SSLContext sslContext = getSSLContext();
 
         SSLDriver clientDriver = getDriver(sslContext.createSSLEngine(), true);
@@ -155,18 +161,32 @@ public class SSLDriverTests extends ESTestCase {
         SSLEngine clientEngine = sslContext.createSSLEngine();
         SSLEngine serverEngine = sslContext.createSSLEngine();
 
-        String[] serverProtocols = {"TLSv1.2"};
+        final String[] serverProtocols;
+        final String[] clientProtocols;
+        final String expectedMessage;
+        if (inFipsJvm()) {
+            // fips JSSE does not support TLSv1.3 yet
+            serverProtocols = new String[]{"TLSv1.2"};
+            clientProtocols = new String[]{"TLSv1.1"};
+            expectedMessage = "org.bouncycastle.tls.TlsFatalAlert: protocol_version(70)";
+        } else if (JavaVersion.current().compareTo(JavaVersion.parse("16")) >= 0) {
+            // JDK16 https://jdk.java.net/16/release-notes does not permit protocol TLSv1.1 OOB
+            serverProtocols = new String[]{"TLSv1.3"};
+            clientProtocols = new String[]{"TLSv1.2"};
+            expectedMessage = "The client supported protocol versions [TLSv1.2] are not accepted by server preferences [TLS13]";
+        } else {
+            serverProtocols = new String[]{"TLSv1.2"};
+            clientProtocols = new String[]{"TLSv1.1"};
+            expectedMessage = "The client supported protocol versions [TLSv1.1] are not accepted by server preferences [TLS12]";
+        }
+
         serverEngine.setEnabledProtocols(serverProtocols);
-        String[] clientProtocols = {"TLSv1.1"};
         clientEngine.setEnabledProtocols(clientProtocols);
         SSLDriver clientDriver = getDriver(clientEngine, true);
         SSLDriver serverDriver = getDriver(serverEngine, false);
 
         SSLException sslException = expectThrows(SSLException.class, () -> handshake(clientDriver, serverDriver));
-        String oldExpected = "Client requested protocol TLSv1.1 not enabled or not supported";
-        String jdk11Expected = "The client supported protocol versions [TLSv1.1] are not accepted by server preferences [TLS12]";
-        boolean expectedMessage = oldExpected.equals(sslException.getMessage()) || jdk11Expected.equals(sslException.getMessage());
-        assertTrue("Unexpected exception message: " + sslException.getMessage(), expectedMessage);
+        assertThat(sslException.getMessage(), is(expectedMessage));
 
         // Prior to JDK11 we still need to send a close alert
         if (serverDriver.isClosed() == false) {
@@ -199,7 +219,8 @@ public class SSLDriverTests extends ESTestCase {
     }
 
     public void testCloseDuringHandshakeJDK11() throws Exception {
-        assumeTrue("this tests ssl engine for JDK11", JavaVersion.current().compareTo(JavaVersion.parse("11")) >= 0);
+        assumeTrue("this tests ssl engine for JDK11",
+            JavaVersion.current().compareTo(JavaVersion.parse("11")) >= 0 && inFipsJvm() == false);
         SSLContext sslContext = getSSLContext();
         SSLDriver clientDriver = getDriver(sslContext.createSSLEngine(), true);
         SSLDriver serverDriver = getDriver(sslContext.createSSLEngine(), false);
@@ -292,7 +313,7 @@ public class SSLDriverTests extends ESTestCase {
             (certPath))));
         KeyManager km = CertParsingUtils.keyManager(CertParsingUtils.readCertificates(Collections.singletonList(getDataPath
             (certPath))), PemUtils.readPrivateKey(getDataPath(keyPath), "testclient"::toCharArray), "testclient".toCharArray());
-        sslContext = SSLContext.getInstance(randomFrom("TLSv1.2", "TLSv1.3"));
+        sslContext = SSLContext.getInstance(inFipsJvm() ? "TLSv1.2" : randomFrom("TLSv1.2", "TLSv1.3"));
         sslContext.init(new KeyManager[] { km }, new TrustManager[] { tm }, new SecureRandom());
         return sslContext;
     }

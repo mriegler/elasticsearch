@@ -5,12 +5,10 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
 import org.elasticsearch.action.ActionRequest;
-import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.ActionResponse;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -25,18 +23,13 @@ import java.io.IOException;
 import java.util.Objects;
 
 
-public class PutFilterAction extends Action<PutFilterAction.Response> {
+public class PutFilterAction extends ActionType<PutFilterAction.Response> {
 
     public static final PutFilterAction INSTANCE = new PutFilterAction();
     public static final String NAME = "cluster:admin/xpack/ml/filters/put";
 
     private PutFilterAction() {
-        super(NAME);
-    }
-
-    @Override
-    public Response newResponse() {
-        return new Response();
+        super(NAME, Response::new);
     }
 
     public static class Request extends ActionRequest implements ToXContentObject {
@@ -55,8 +48,9 @@ public class PutFilterAction extends Action<PutFilterAction.Response> {
 
         private MlFilter filter;
 
-        public Request() {
-
+        public Request(StreamInput in) throws IOException {
+            super(in);
+            filter = new MlFilter(in);
         }
 
         public Request(MlFilter filter) {
@@ -70,12 +64,6 @@ public class PutFilterAction extends Action<PutFilterAction.Response> {
         @Override
         public ActionRequestValidationException validate() {
             return null;
-        }
-
-        @Override
-        public void readFrom(StreamInput in) throws IOException {
-            super.readFrom(in);
-            filter = new MlFilter(in);
         }
 
         @Override
@@ -108,13 +96,6 @@ public class PutFilterAction extends Action<PutFilterAction.Response> {
         }
     }
 
-    public static class RequestBuilder extends ActionRequestBuilder<Request, Response> {
-
-        public RequestBuilder(ElasticsearchClient client) {
-            super(client, INSTANCE, new Request());
-        }
-    }
-
     public static class Response extends ActionResponse implements ToXContentObject {
 
         private MlFilter filter;
@@ -122,19 +103,17 @@ public class PutFilterAction extends Action<PutFilterAction.Response> {
         Response() {
         }
 
+        Response(StreamInput in) throws IOException {
+            super(in);
+            filter = new MlFilter(in);
+        }
+
         public Response(MlFilter filter) {
             this.filter = filter;
         }
 
         @Override
-        public void readFrom(StreamInput in) throws IOException {
-            super.readFrom(in);
-            filter = new MlFilter(in);
-        }
-
-        @Override
         public void writeTo(StreamOutput out) throws IOException {
-            super.writeTo(out);
             filter.writeTo(out);
         }
 

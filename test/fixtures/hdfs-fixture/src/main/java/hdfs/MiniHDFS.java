@@ -99,18 +99,23 @@ public class MiniHDFS {
         UserGroupInformation.setConfiguration(cfg);
 
         MiniDFSCluster.Builder builder = new MiniDFSCluster.Builder(cfg);
-        if (secure) {
-            builder.nameNodePort(9998);
+        String explicitPort = System.getProperty("hdfs.config.port");
+        if(explicitPort != null) {
+            builder.nameNodePort(Integer.parseInt(explicitPort));
         } else {
-            builder.nameNodePort(9999);
+            if (secure) {
+                builder.nameNodePort(9998);
+            } else {
+                builder.nameNodePort(9999);
+            }
         }
 
         // Configure HA mode
         String haNameService = System.getProperty("ha-nameservice");
         boolean haEnabled = haNameService != null;
         if (haEnabled) {
-            MiniDFSNNTopology.NNConf nn1 = new MiniDFSNNTopology.NNConf("nn1").setIpcPort(10001);
-            MiniDFSNNTopology.NNConf nn2 = new MiniDFSNNTopology.NNConf("nn2").setIpcPort(10002);
+            MiniDFSNNTopology.NNConf nn1 = new MiniDFSNNTopology.NNConf("nn1").setIpcPort(0);
+            MiniDFSNNTopology.NNConf nn2 = new MiniDFSNNTopology.NNConf("nn2").setIpcPort(0);
             MiniDFSNNTopology.NSConf nameservice = new MiniDFSNNTopology.NSConf(haNameService).addNN(nn1).addNN(nn2);
             MiniDFSNNTopology namenodeTopology = new MiniDFSNNTopology().addNameservice(nameservice);
             builder.nnTopology(namenodeTopology);

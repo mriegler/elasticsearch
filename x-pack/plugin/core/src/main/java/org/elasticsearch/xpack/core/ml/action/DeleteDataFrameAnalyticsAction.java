@@ -5,59 +5,67 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
 import org.elasticsearch.action.ActionRequestValidationException;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.support.master.AcknowledgedRequest;
 import org.elasticsearch.action.support.master.AcknowledgedResponse;
-import org.elasticsearch.action.support.master.MasterNodeOperationRequestBuilder;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Writeable;
-import org.elasticsearch.common.xcontent.ToXContentFragment;
-import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.unit.TimeValue;
 import org.elasticsearch.xpack.core.ml.dataframe.DataFrameAnalyticsConfig;
 import org.elasticsearch.xpack.core.ml.utils.ExceptionsHelper;
 
 import java.io.IOException;
 import java.util.Objects;
+import java.util.concurrent.TimeUnit;
 
-public class DeleteDataFrameAnalyticsAction extends Action<AcknowledgedResponse> {
+public class DeleteDataFrameAnalyticsAction extends ActionType<AcknowledgedResponse> {
 
     public static final DeleteDataFrameAnalyticsAction INSTANCE = new DeleteDataFrameAnalyticsAction();
     public static final String NAME = "cluster:admin/xpack/ml/data_frame/analytics/delete";
+    public static final String DELETION_TASK_DESCRIPTION_PREFIX = "delete-analytics-";
 
     private DeleteDataFrameAnalyticsAction() {
-        super(NAME);
+        super(NAME, AcknowledgedResponse::readFrom);
     }
 
-    @Override
-    public AcknowledgedResponse newResponse() {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
-    }
+    public static class Request extends AcknowledgedRequest<Request> {
 
-    @Override
-    public Writeable.Reader<AcknowledgedResponse> getResponseReader() {
-        return AcknowledgedResponse::new;
-    }
+        public static final ParseField FORCE = new ParseField("force");
+        public static final ParseField TIMEOUT = new ParseField("timeout");
 
-    public static class Request extends AcknowledgedRequest<Request> implements ToXContentFragment {
+        // Default timeout matches that of delete by query
+        private static final TimeValue DEFAULT_TIMEOUT = new TimeValue(1, TimeUnit.MINUTES);
 
         private String id;
+        private boolean force;
 
         public Request(StreamInput in) throws IOException {
             super(in);
             id = in.readString();
+            force = in.readBoolean();
         }
 
-        public Request() {}
+        public Request() {
+            timeout(DEFAULT_TIMEOUT);
+        }
 
         public Request(String id) {
+            this();
             this.id = ExceptionsHelper.requireNonNull(id, DataFrameAnalyticsConfig.ID);
         }
 
         public String getId() {
             return id;
+        }
+
+        public boolean isForce() {
+            return force;
+        }
+
+        public void setForce(boolean force) {
+            this.force = force;
         }
 
         @Override
@@ -66,9 +74,8 @@ public class DeleteDataFrameAnalyticsAction extends Action<AcknowledgedResponse>
         }
 
         @Override
-        public XContentBuilder toXContent(XContentBuilder builder, Params params) throws IOException {
-            builder.field(DataFrameAnalyticsConfig.ID.getPreferredName(), id);
-            return builder;
+        public String getDescription() {
+            return DELETION_TASK_DESCRIPTION_PREFIX + id;
         }
 
         @Override
@@ -76,25 +83,21 @@ public class DeleteDataFrameAnalyticsAction extends Action<AcknowledgedResponse>
             if (this == o) return true;
             if (o == null || getClass() != o.getClass()) return false;
             DeleteDataFrameAnalyticsAction.Request request = (DeleteDataFrameAnalyticsAction.Request) o;
-            return Objects.equals(id, request.id);
+            return Objects.equals(id, request.id)
+                && force == request.force
+                && Objects.equals(timeout, request.timeout);
         }
 
         @Override
         public void writeTo(StreamOutput out) throws IOException {
             super.writeTo(out);
             out.writeString(id);
+            out.writeBoolean(force);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(id);
-        }
-    }
-
-    public static class RequestBuilder extends MasterNodeOperationRequestBuilder<Request, AcknowledgedResponse, RequestBuilder> {
-
-        protected RequestBuilder(ElasticsearchClient client, DeleteDataFrameAnalyticsAction action) {
-            super(client, action, new Request());
+            return Objects.hash(id, force, timeout);
         }
     }
 }

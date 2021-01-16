@@ -29,13 +29,13 @@ import org.elasticsearch.index.mapper.MapperExtrasPlugin;
 import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.query.RankFeatureQueryBuilder.ScoreFunction;
 import org.elasticsearch.plugins.Plugin;
-import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.test.AbstractQueryTestCase;
+import org.elasticsearch.test.TestGeoShapeFieldMapperPlugin;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
 
 import static org.hamcrest.CoreMatchers.instanceOf;
@@ -45,7 +45,7 @@ public class RankFeatureQueryBuilderTests extends AbstractQueryTestCase<RankFeat
 
     @Override
     protected void initializeAdditionalMappings(MapperService mapperService) throws IOException {
-        mapperService.merge("_doc", new CompressedXContent(Strings.toString(PutMappingRequest.buildFromSimplifiedDef("_doc",
+        mapperService.merge("_doc", new CompressedXContent(Strings.toString(PutMappingRequest.simpleMapping(
             "my_feature_field", "type=rank_feature",
             "my_negative_feature_field", "type=rank_feature,positive_score_impact=false",
             "my_feature_vector_field", "type=rank_features"))), MapperService.MergeReason.MAPPING_UPDATE);
@@ -53,7 +53,7 @@ public class RankFeatureQueryBuilderTests extends AbstractQueryTestCase<RankFeat
 
     @Override
     protected Collection<Class<? extends Plugin>> getPlugins() {
-        return Collections.singleton(MapperExtrasPlugin.class);
+        return Arrays.asList(MapperExtrasPlugin.class, TestGeoShapeFieldMapperPlugin.class);
     }
 
     @Override
@@ -91,7 +91,7 @@ public class RankFeatureQueryBuilderTests extends AbstractQueryTestCase<RankFeat
     }
 
     @Override
-    protected void doAssertLuceneQuery(RankFeatureQueryBuilder queryBuilder, Query query, SearchContext context) throws IOException {
+    protected void doAssertLuceneQuery(RankFeatureQueryBuilder queryBuilder, Query query, SearchExecutionContext context) {
         Class<?> expectedClass = FeatureField.newSaturationQuery("", "", 1, 1).getClass();
         assertThat(query, either(instanceOf(MatchNoDocsQuery.class)).or(instanceOf(expectedClass)));
     }
@@ -102,17 +102,18 @@ public class RankFeatureQueryBuilderTests extends AbstractQueryTestCase<RankFeat
                 "        \"field\": \"my_feature_field\"\n" +
                 "    }\n" +
                 "}";
-        Query parsedQuery = parseQuery(query).toQuery(createShardContext());
+        Query parsedQuery = parseQuery(query).toQuery(createSearchExecutionContext());
         assertEquals(FeatureField.newSaturationQuery("_feature", "my_feature_field"), parsedQuery);
     }
 
     public void testIllegalField() throws IOException {
         String query = "{\n" +
                 "    \"rank_feature\" : {\n" +
-                "        \"field\": \"" + STRING_FIELD_NAME + "\"\n" +
+                "        \"field\": \"" + TEXT_FIELD_NAME + "\"\n" +
                 "    }\n" +
                 "}";
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> parseQuery(query).toQuery(createShardContext()));
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class,
+            () -> parseQuery(query).toQuery(createSearchExecutionContext()));
         assertEquals("[rank_feature] query only works on [rank_feature] fields and features of [rank_features] fields, not [text]",
             e.getMessage());
     }
@@ -126,7 +127,8 @@ public class RankFeatureQueryBuilderTests extends AbstractQueryTestCase<RankFeat
                 "        }\n" +
                 "    }\n" +
                 "}";
-        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> parseQuery(query).toQuery(createShardContext()));
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class,
+            () -> parseQuery(query).toQuery(createSearchExecutionContext()));
         assertEquals(
                 "Cannot use the [log] function with a field that has a negative score impact as it would trigger negative scores",
                 e.getMessage());

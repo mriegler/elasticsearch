@@ -5,10 +5,8 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
-import org.elasticsearch.action.ActionRequestBuilder;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.action.support.tasks.BaseTasksResponse;
-import org.elasticsearch.client.ElasticsearchClient;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.io.stream.Writeable;
@@ -16,29 +14,16 @@ import org.elasticsearch.common.io.stream.Writeable;
 import java.io.IOException;
 import java.util.Objects;
 
-public class PersistJobAction extends Action<PersistJobAction.Response> {
+public class PersistJobAction extends ActionType<PersistJobAction.Response> {
 
     public static final PersistJobAction INSTANCE = new PersistJobAction();
     public static final String NAME = "cluster:admin/xpack/ml/job/persist";
 
     private PersistJobAction() {
-        super(NAME);
-    }
-
-    @Override
-    public Response newResponse() {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
-    }
-
-    @Override
-    public Writeable.Reader<Response> getResponseReader() {
-        return Response::new;
+        super(NAME, PersistJobAction.Response::new);
     }
 
     public static class Request extends JobTaskRequest<PersistJobAction.Request> {
-
-        public Request() {
-        }
 
         public Request(StreamInput in) throws IOException {
             super(in);
@@ -121,9 +106,4 @@ public class PersistJobAction extends Action<PersistJobAction.Response> {
         }
     }
 
-    static class RequestBuilder extends ActionRequestBuilder<Request, Response> {
-        RequestBuilder(ElasticsearchClient client, PersistJobAction action) {
-            super(client, action, new PersistJobAction.Request());
-        }
-    }
 }

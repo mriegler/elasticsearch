@@ -15,6 +15,7 @@ import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.protocol.xpack.XPackUsageRequest;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.core.XPackFeatureSet;
@@ -37,8 +38,8 @@ public class TransportXPackUsageAction extends TransportMasterNodeAction<XPackUs
     public TransportXPackUsageAction(ThreadPool threadPool, TransportService transportService,
                                      ClusterService clusterService, ActionFilters actionFilters,
                                      IndexNameExpressionResolver indexNameExpressionResolver, NodeClient client) {
-        super(XPackUsageAction.NAME, transportService, clusterService, threadPool, actionFilters, indexNameExpressionResolver,
-                XPackUsageRequest::new);
+        super(XPackUsageAction.NAME, transportService, clusterService, threadPool, actionFilters, XPackUsageRequest::new,
+            indexNameExpressionResolver, XPackUsageResponse::new, ThreadPool.Names.MANAGEMENT);
         this.client = client;
         this.usageActions = usageActions();
     }
@@ -49,17 +50,7 @@ public class TransportXPackUsageAction extends TransportMasterNodeAction<XPackUs
     }
 
     @Override
-    protected String executor() {
-        return ThreadPool.Names.MANAGEMENT;
-    }
-
-    @Override
-    protected XPackUsageResponse newResponse() {
-        return new XPackUsageResponse();
-    }
-
-    @Override
-    protected void masterOperation(XPackUsageRequest request, ClusterState state, ActionListener<XPackUsageResponse> listener) {
+    protected void masterOperation(Task task, XPackUsageRequest request, ClusterState state, ActionListener<XPackUsageResponse> listener) {
         final ActionListener<List<XPackFeatureSet.Usage>> usageActionListener = new ActionListener<>() {
             @Override
             public void onResponse(List<Usage> usages) {

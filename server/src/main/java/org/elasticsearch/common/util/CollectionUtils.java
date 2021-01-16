@@ -20,7 +20,6 @@
 package org.elasticsearch.common.util;
 
 import com.carrotsearch.hppc.ObjectArrayList;
-
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.BytesRefArray;
 import org.apache.lucene.util.BytesRefBuilder;
@@ -152,6 +151,7 @@ public class CollectionUtils {
         }
     }
 
+    @SuppressWarnings("unchecked")
     private static Iterable<?> convert(Object value) {
         if (value == null) {
             return null;
@@ -267,12 +267,13 @@ public class CollectionUtils {
 
     }
 
+    @SuppressWarnings("unchecked")
     public static <E> ArrayList<E> iterableAsArrayList(Iterable<? extends E> elements) {
         if (elements == null) {
             throw new NullPointerException("elements");
         }
         if (elements instanceof Collection) {
-            return new ArrayList<>((Collection)elements);
+            return new ArrayList<>((Collection) elements);
         } else {
             ArrayList<E> list = new ArrayList<>();
             for (E element : elements) {
@@ -282,6 +283,8 @@ public class CollectionUtils {
         }
     }
 
+    @SafeVarargs
+    @SuppressWarnings("varargs")
     public static <E> ArrayList<E> arrayAsArrayList(E... elements) {
         if (elements == null) {
             throw new NullPointerException("elements");
@@ -289,6 +292,8 @@ public class CollectionUtils {
         return new ArrayList<>(Arrays.asList(elements));
     }
 
+    @SafeVarargs
+    @SuppressWarnings("varargs")
     public static <E> ArrayList<E> asArrayList(E first, E... other) {
         if (other == null) {
             throw new NullPointerException("other");
@@ -299,6 +304,8 @@ public class CollectionUtils {
         return list;
     }
 
+    @SafeVarargs
+    @SuppressWarnings("varargs")
     public static<E> ArrayList<E> asArrayList(E first, E second, E... other) {
         if (other == null) {
             throw new NullPointerException("other");
@@ -308,6 +315,20 @@ public class CollectionUtils {
         list.add(second);
         list.addAll(Arrays.asList(other));
         return list;
+    }
+
+    /**
+     * Creates a copy of the given collection with the given element appended.
+     *
+     * @param collection collection to copy
+     * @param element    element to append
+     */
+    @SuppressWarnings("unchecked")
+    public static <E> List<E> appendToCopy(Collection<E> collection, E element) {
+        final int size = collection.size() + 1;
+        final E[] array = collection.toArray((E[]) new Object[size]);
+        array[size - 1] = element;
+        return Arrays.asList(array);
     }
 
     public static <E> ArrayList<E> newSingletonArrayList(E element) {

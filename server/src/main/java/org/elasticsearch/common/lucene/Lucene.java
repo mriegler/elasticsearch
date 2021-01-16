@@ -22,10 +22,10 @@ package org.elasticsearch.common.lucene;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.apache.lucene.analysis.core.KeywordAnalyzer;
+import org.apache.lucene.analysis.core.WhitespaceAnalyzer;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.codecs.CodecUtil;
-import org.apache.lucene.codecs.DocValuesFormat;
-import org.apache.lucene.codecs.PostingsFormat;
+import org.apache.lucene.codecs.StoredFieldsReader;
 import org.apache.lucene.document.LatLonDocValuesField;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.index.BinaryDocValues;
@@ -89,13 +89,16 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.SuppressForbidden;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
+import org.elasticsearch.common.lucene.index.SequentialStoredFieldsLeafReader;
 import org.elasticsearch.common.lucene.search.TopDocsAndMaxScore;
 import org.elasticsearch.common.util.iterable.Iterables;
 import org.elasticsearch.index.analysis.AnalyzerScope;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
 import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.search.sort.ShardDocSortField;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.text.ParseException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -105,21 +108,14 @@ import java.util.List;
 import java.util.Map;
 
 public class Lucene {
-    public static final String LATEST_DOC_VALUES_FORMAT = "Lucene70";
-    public static final String LATEST_POSTINGS_FORMAT = "Lucene50";
-    public static final String LATEST_CODEC = "Lucene80";
-
-    static {
-        Deprecated annotation = PostingsFormat.forName(LATEST_POSTINGS_FORMAT).getClass().getAnnotation(Deprecated.class);
-        assert annotation == null : "PostingsFromat " + LATEST_POSTINGS_FORMAT + " is deprecated" ;
-        annotation = DocValuesFormat.forName(LATEST_DOC_VALUES_FORMAT).getClass().getAnnotation(Deprecated.class);
-        assert annotation == null : "DocValuesFormat " + LATEST_DOC_VALUES_FORMAT + " is deprecated" ;
-    }
+    public static final String LATEST_CODEC = "Lucene87";
 
     public static final String SOFT_DELETES_FIELD = "__soft_deletes";
 
     public static final NamedAnalyzer STANDARD_ANALYZER = new NamedAnalyzer("_standard", AnalyzerScope.GLOBAL, new StandardAnalyzer());
     public static final NamedAnalyzer KEYWORD_ANALYZER = new NamedAnalyzer("_keyword", AnalyzerScope.GLOBAL, new KeywordAnalyzer());
+    public static final NamedAnalyzer WHITESPACE_ANALYZER
+        = new NamedAnalyzer("_whitespace", AnalyzerScope.GLOBAL, new WhitespaceAnalyzer());
 
     public static final ScoreDoc[] EMPTY_SCORE_DOCS = new ScoreDoc[0];
 
@@ -256,14 +252,15 @@ public class Lucene {
                 .setSoftDeletesField(Lucene.SOFT_DELETES_FIELD)
                 .setMergePolicy(NoMergePolicy.INSTANCE) // no merges
                 .setCommitOnClose(false) // no commits
-                .setOpenMode(IndexWriterConfig.OpenMode.CREATE))) // force creation - don't append...
+                .setOpenMode(IndexWriterConfig.OpenMode.CREATE) // force creation - don't append...
+        ))
         {
             // do nothing and close this will kick of IndexFileDeleter which will remove all pending files
         }
     }
 
     public static void checkSegmentInfoIntegrity(final Directory directory) throws IOException {
-        new SegmentInfos.FindSegmentsFile(directory) {
+        new SegmentInfos.FindSegmentsFile<>(directory) {
 
             @Override
             protected Object doBody(String segmentFileName) throws IOException {
@@ -310,9 +307,15 @@ public class Lucene {
             TotalHits totalHits = readTotalHits(in);
             float maxScore = in.readFloat();
 
-            ScoreDoc[] scoreDocs = new ScoreDoc[in.readVInt()];
-            for (int i = 0; i < scoreDocs.length; i++) {
-                scoreDocs[i] = new ScoreDoc(in.readVInt(), in.readFloat());
+            final int scoreDocCount = in.readVInt();
+            final ScoreDoc[] scoreDocs;
+            if (scoreDocCount == 0) {
+                scoreDocs = EMPTY_SCORE_DOCS;
+            } else {
+                scoreDocs = new ScoreDoc[scoreDocCount];
+                for (int i = 0; i < scoreDocs.length; i++) {
+                    scoreDocs[i] = new ScoreDoc(in.readVInt(), in.readFloat());
+                }
             }
             return new TopDocsAndMaxScore(new TopDocs(totalHits, scoreDocs), maxScore);
         } else if (type == 1) {
@@ -344,7 +347,7 @@ public class Lucene {
     }
 
     public static FieldDoc readFieldDoc(StreamInput in) throws IOException {
-        Comparable[] cFields = new Comparable[in.readVInt()];
+        Comparable<?>[] cFields = new Comparable<?>[in.readVInt()];
         for (int j = 0; j < cFields.length; j++) {
             byte type = in.readByte();
             if (type == 0) {
@@ -367,6 +370,8 @@ public class Lucene {
                 cFields[j] = in.readBoolean();
             } else if (type == 9) {
                 cFields[j] = in.readBytesRef();
+            } else if (type == 10) {
+                cFields[j] = new BigInteger(in.readString());
             } else {
                 throw new IOException("Can't match type [" + type + "]");
             }
@@ -374,7 +379,7 @@ public class Lucene {
         return new FieldDoc(in.readVInt(), in.readFloat(), cFields);
     }
 
-    public static Comparable readSortValue(StreamInput in) throws IOException {
+    public static Comparable<?> readSortValue(StreamInput in) throws IOException {
         byte type = in.readByte();
         if (type == 0) {
             return null;
@@ -396,6 +401,8 @@ public class Lucene {
             return in.readBoolean();
         } else if (type == 9) {
             return in.readBytesRef();
+        } else if (type == 10) {
+            return new BigInteger(in.readString());
         } else {
             throw new IOException("Can't match type [" + type + "]");
         }
@@ -483,7 +490,7 @@ public class Lucene {
         if (field == null) {
             out.writeByte((byte) 0);
         } else {
-            Class type = field.getClass();
+            Class<?> type = field.getClass();
             if (type == String.class) {
                 out.writeByte((byte) 1);
                 out.writeString((String) field);
@@ -511,6 +518,10 @@ public class Lucene {
             } else if (type == BytesRef.class) {
                 out.writeByte((byte) 9);
                 out.writeBytesRef((BytesRef) field);
+            } else if (type == BigInteger.class) {
+                //TODO: improve serialization of BigInteger
+                out.writeByte((byte) 10);
+                out.writeString(field.toString());
             } else {
                 throw new IOException("Can't handle sort field value of type [" + type + "]");
             }
@@ -558,29 +569,35 @@ public class Lucene {
         out.writeVInt(sortType.ordinal());
     }
 
-    public static void writeSortField(StreamOutput out, SortField sortField) throws IOException {
+    /**
+     * Returns the generic version of the provided {@link SortField} that
+     * can be used to merge documents coming from different shards.
+     */
+    private static SortField rewriteMergeSortField(SortField sortField) {
         if (sortField.getClass() == GEO_DISTANCE_SORT_TYPE_CLASS) {
-            // for geo sorting, we replace the SortField with a SortField that assumes a double field.
-            // this works since the SortField is only used for merging top docs
             SortField newSortField = new SortField(sortField.getField(), SortField.Type.DOUBLE);
             newSortField.setMissingValue(sortField.getMissingValue());
-            sortField = newSortField;
+            return newSortField;
         } else if (sortField.getClass() == SortedSetSortField.class) {
-            // for multi-valued sort field, we replace the SortedSetSortField with a simple SortField.
-            // It works because the sort field is only used to merge results from different shards.
             SortField newSortField = new SortField(sortField.getField(), SortField.Type.STRING, sortField.getReverse());
             newSortField.setMissingValue(sortField.getMissingValue());
-            sortField = newSortField;
+            return newSortField;
         } else if (sortField.getClass() == SortedNumericSortField.class) {
-            // for multi-valued sort field, we replace the SortedSetSortField with a simple SortField.
-            // It works because the sort field is only used to merge results from different shards.
             SortField newSortField = new SortField(sortField.getField(),
                 ((SortedNumericSortField) sortField).getNumericType(),
                 sortField.getReverse());
             newSortField.setMissingValue(sortField.getMissingValue());
-            sortField = newSortField;
+            return newSortField;
+        } else if (sortField.getClass() == ShardDocSortField.class) {
+            SortField newSortField = new SortField(sortField.getField(), SortField.Type.LONG, sortField.getReverse());
+            return newSortField;
+        } else {
+            return sortField;
         }
+    }
 
+    public static void writeSortField(StreamOutput out, SortField sortField) throws IOException {
+        sortField = rewriteMergeSortField(sortField);
         if (sortField.getClass() != SortField.class) {
             throw new IllegalArgumentException("Cannot serialize SortField impl [" + sortField + "]");
         }
@@ -801,16 +818,27 @@ public class Lucene {
     }
 
     /**
-     * Given a {@link ScorerSupplier}, return a {@link Bits} instance that will match
-     * all documents contained in the set. Note that the returned {@link Bits}
-     * instance MUST be consumed in order.
+     * Return a {@link Bits} view of the provided scorer.
+     * <b>NOTE</b>: that the returned {@link Bits} instance MUST be consumed in order.
+     * @see #asSequentialAccessBits(int, ScorerSupplier, long)
      */
     public static Bits asSequentialAccessBits(final int maxDoc, @Nullable ScorerSupplier scorerSupplier) throws IOException {
+        return asSequentialAccessBits(maxDoc, scorerSupplier, 0L);
+    }
+
+    /**
+     * Given a {@link ScorerSupplier}, return a {@link Bits} instance that will match
+     * all documents contained in the set.
+     * <b>NOTE</b>: that the returned {@link Bits} instance MUST be consumed in order.
+     * @param estimatedGetCount an estimation of the number of times that {@link Bits#get} will get called
+     */
+    public static Bits asSequentialAccessBits(final int maxDoc, @Nullable ScorerSupplier scorerSupplier,
+            long estimatedGetCount) throws IOException {
         if (scorerSupplier == null) {
             return new Bits.MatchNoBits(maxDoc);
         }
         // Since we want bits, we need random-access
-        final Scorer scorer = scorerSupplier.get(Long.MAX_VALUE); // this never returns null
+        final Scorer scorer = scorerSupplier.get(estimatedGetCount); // this never returns null
         final TwoPhaseIterator twoPhase = scorer.twoPhaseIterator();
         final DocIdSetIterator iterator;
         if (twoPhase == null) {
@@ -891,7 +919,7 @@ public class Lucene {
     }
 
     private static final class DirectoryReaderWithAllLiveDocs extends FilterDirectoryReader {
-        static final class LeafReaderWithLiveDocs extends FilterLeafReader {
+        static final class LeafReaderWithLiveDocs extends SequentialStoredFieldsLeafReader {
             final Bits liveDocs;
             final int numDocs;
             LeafReaderWithLiveDocs(LeafReader in, Bits liveDocs, int  numDocs) {
@@ -914,6 +942,10 @@ public class Lucene {
             @Override
             public CacheHelper getReaderCacheHelper() {
                 return null; // Modifying liveDocs
+            }
+            @Override
+            protected StoredFieldsReader doGetSequentialStoredFieldsReader(StoredFieldsReader reader) {
+                return reader;
             }
         }
 

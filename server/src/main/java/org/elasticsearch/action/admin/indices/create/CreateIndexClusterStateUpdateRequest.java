@@ -24,14 +24,11 @@ import org.elasticsearch.action.admin.indices.shrink.ResizeType;
 import org.elasticsearch.action.support.ActiveShardCount;
 import org.elasticsearch.cluster.ack.ClusterStateUpdateRequest;
 import org.elasticsearch.cluster.block.ClusterBlock;
-import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.metadata.IndexMetadata;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.index.Index;
-import org.elasticsearch.transport.TransportMessage;
 
-import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -39,19 +36,17 @@ import java.util.Set;
  */
 public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequest<CreateIndexClusterStateUpdateRequest> {
 
-    private final TransportMessage originalMessage;
     private final String cause;
     private final String index;
+    private String dataStreamName;
     private final String providedName;
     private Index recoverFrom;
     private ResizeType resizeType;
     private boolean copySettings;
 
-    private IndexMetaData.State state = IndexMetaData.State.OPEN;
-
     private Settings settings = Settings.Builder.EMPTY_SETTINGS;
 
-    private final Map<String, String> mappings = new HashMap<>();
+    private String mappings = "{}";
 
     private final Set<Alias> aliases = new HashSet<>();
 
@@ -59,8 +54,7 @@ public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequ
 
     private ActiveShardCount waitForActiveShards = ActiveShardCount.DEFAULT;
 
-    public CreateIndexClusterStateUpdateRequest(TransportMessage originalMessage, String cause, String index, String providedName) {
-        this.originalMessage = originalMessage;
+    public CreateIndexClusterStateUpdateRequest(String cause, String index, String providedName) {
         this.cause = cause;
         this.index = index;
         this.providedName = providedName;
@@ -71,23 +65,13 @@ public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequ
         return this;
     }
 
-    public CreateIndexClusterStateUpdateRequest mappings(Map<String, String> mappings) {
-        this.mappings.putAll(mappings);
+    public CreateIndexClusterStateUpdateRequest mappings(String mappings) {
+        this.mappings = mappings;
         return this;
     }
 
     public CreateIndexClusterStateUpdateRequest aliases(Set<Alias> aliases) {
         this.aliases.addAll(aliases);
-        return this;
-    }
-
-    public CreateIndexClusterStateUpdateRequest blocks(Set<ClusterBlock> blocks) {
-        this.blocks.addAll(blocks);
-        return this;
-    }
-
-    public CreateIndexClusterStateUpdateRequest state(IndexMetaData.State state) {
-        this.state = state;
         return this;
     }
 
@@ -111,10 +95,6 @@ public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequ
         return this;
     }
 
-    public TransportMessage originalMessage() {
-        return originalMessage;
-    }
-
     public String cause() {
         return cause;
     }
@@ -123,15 +103,11 @@ public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequ
         return index;
     }
 
-    public IndexMetaData.State state() {
-        return state;
-    }
-
     public Settings settings() {
         return settings;
     }
 
-    public Map<String, String> mappings() {
+    public String mappings() {
         return mappings;
     }
 
@@ -149,7 +125,7 @@ public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequ
 
     /**
      * The name that was provided by the user. This might contain a date math expression.
-     * @see IndexMetaData#SETTING_INDEX_PROVIDED_NAME
+     * @see IndexMetadata#SETTING_INDEX_PROVIDED_NAME
      */
     public String getProvidedName() {
         return providedName;
@@ -170,4 +146,33 @@ public class CreateIndexClusterStateUpdateRequest extends ClusterStateUpdateRequ
         return copySettings;
     }
 
+    /**
+     * Returns the name of the data stream this new index will be part of.
+     * If this new index will not be part of a data stream then this returns <code>null</code>.
+     */
+    public String dataStreamName() {
+        return dataStreamName;
+    }
+
+    public CreateIndexClusterStateUpdateRequest dataStreamName(String dataStreamName) {
+        this.dataStreamName = dataStreamName;
+        return this;
+    }
+
+    @Override
+    public String toString() {
+        return "CreateIndexClusterStateUpdateRequest{" +
+            "cause='" + cause + '\'' +
+            ", index='" + index + '\'' +
+            ", dataStreamName='" + dataStreamName + '\'' +
+            ", providedName='" + providedName + '\'' +
+            ", recoverFrom=" + recoverFrom +
+            ", resizeType=" + resizeType +
+            ", copySettings=" + copySettings +
+            ", settings=" + settings +
+            ", aliases=" + aliases +
+            ", blocks=" + blocks +
+            ", waitForActiveShards=" + waitForActiveShards +
+            '}';
+    }
 }

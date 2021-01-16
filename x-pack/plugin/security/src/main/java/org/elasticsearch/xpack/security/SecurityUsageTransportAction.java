@@ -16,6 +16,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.CountDown;
 import org.elasticsearch.license.XPackLicenseState;
 import org.elasticsearch.protocol.xpack.XPackUsageRequest;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.core.XPackSettings;
@@ -28,6 +29,7 @@ import org.elasticsearch.xpack.security.audit.logfile.LoggingAuditTrail;
 import org.elasticsearch.xpack.security.authc.Realms;
 import org.elasticsearch.xpack.security.authc.support.mapper.NativeRoleMappingStore;
 import org.elasticsearch.xpack.security.authz.store.CompositeRolesStore;
+import org.elasticsearch.xpack.security.operator.OperatorPrivileges;
 import org.elasticsearch.xpack.security.transport.filter.IPFilter;
 
 import java.util.Arrays;
@@ -38,13 +40,13 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static java.util.Collections.singletonMap;
 import static org.elasticsearch.xpack.core.XPackSettings.API_KEY_SERVICE_ENABLED_SETTING;
+import static org.elasticsearch.xpack.core.XPackSettings.FIPS_MODE_ENABLED;
 import static org.elasticsearch.xpack.core.XPackSettings.HTTP_SSL_ENABLED;
 import static org.elasticsearch.xpack.core.XPackSettings.TOKEN_SERVICE_ENABLED_SETTING;
 import static org.elasticsearch.xpack.core.XPackSettings.TRANSPORT_SSL_ENABLED;
 
 public class SecurityUsageTransportAction extends XPackUsageFeatureTransportAction {
 
-    private final boolean enabledInSettings;
     private final Settings settings;
     private final XPackLicenseState licenseState;
     private final Realms realms;
@@ -58,7 +60,6 @@ public class SecurityUsageTransportAction extends XPackUsageFeatureTransportActi
                                         Settings settings, XPackLicenseState licenseState, SecurityUsageServices securityServices) {
         super(XPackUsageFeatureAction.SECURITY.name(), transportService, clusterService, threadPool,
               actionFilters, indexNameExpressionResolver);
-        this.enabledInSettings = XPackSettings.SECURITY_ENABLED.get(settings);
         this.settings = settings;
         this.licenseState = licenseState;
         this.realms = securityServices.realms;
@@ -68,24 +69,31 @@ public class SecurityUsageTransportAction extends XPackUsageFeatureTransportActi
     }
 
     @Override
-    protected void masterOperation(XPackUsageRequest request, ClusterState state, ActionListener<XPackUsageFeatureResponse> listener) {
+    protected void masterOperation(Task task, XPackUsageRequest request, ClusterState state,
+                                   ActionListener<XPackUsageFeatureResponse> listener) {
         Map<String, Object> sslUsage = sslUsage(settings);
         Map<String, Object> tokenServiceUsage = tokenServiceUsage(settings);
         Map<String, Object> apiKeyServiceUsage = apiKeyServiceUsage(settings);
         Map<String, Object> auditUsage = auditUsage(settings);
         Map<String, Object> ipFilterUsage = ipFilterUsage(ipFilter);
         Map<String, Object> anonymousUsage = singletonMap("enabled", AnonymousUser.isAnonymousEnabled(settings));
+        Map<String, Object> fips140Usage = fips140Usage(settings);
+        Map<String, Object> operatorPrivilegesUsage = Map.of(
+            "available", licenseState.isAllowed(XPackLicenseState.Feature.OPERATOR_PRIVILEGES),
+            "enabled", OperatorPrivileges.OPERATOR_PRIVILEGES_ENABLED.get(settings)
+        );
 
         final AtomicReference<Map<String, Object>> rolesUsageRef = new AtomicReference<>();
         final AtomicReference<Map<String, Object>> roleMappingUsageRef = new AtomicReference<>();
         final AtomicReference<Map<String, Object>> realmsUsageRef = new AtomicReference<>();
+
+        final boolean enabled = licenseState.isSecurityEnabled();
         final CountDown countDown = new CountDown(3);
         final Runnable doCountDown = () -> {
             if (countDown.countDown()) {
-                boolean enabled = enabledInSettings && licenseState.isSecurityDisabledByLicenseDefaults() == false;
-                var usage = new SecurityFeatureSetUsage(licenseState.isSecurityAvailable(), enabled,
+                var usage = new SecurityFeatureSetUsage(enabled,
                         realmsUsageRef.get(), rolesUsageRef.get(), roleMappingUsageRef.get(), sslUsage, auditUsage,
-                        ipFilterUsage, anonymousUsage, tokenServiceUsage, apiKeyServiceUsage);
+                        ipFilterUsage, anonymousUsage, tokenServiceUsage, apiKeyServiceUsage, fips140Usage, operatorPrivilegesUsage);
                 listener.onResponse(new XPackUsageFeatureResponse(usage));
             }
         };
@@ -109,17 +117,17 @@ public class SecurityUsageTransportAction extends XPackUsageFeatureTransportActi
                 doCountDown.run();
             }, listener::onFailure);
 
-        if (rolesStore == null) {
+        if (rolesStore == null || enabled == false) {
             rolesStoreUsageListener.onResponse(Collections.emptyMap());
         } else {
             rolesStore.usageStats(rolesStoreUsageListener);
         }
-        if (roleMappingStore == null) {
+        if (roleMappingStore == null || enabled == false) {
             roleMappingStoreUsageListener.onResponse(Collections.emptyMap());
         } else {
             roleMappingStore.usageStats(roleMappingStoreUsageListener);
         }
-        if (realms == null) {
+        if (realms == null || enabled == false) {
             realmsUsageListener.onResponse(Collections.emptyMap());
         } else {
             realms.usageStats(realmsUsageListener);
@@ -165,5 +173,9 @@ public class SecurityUsageTransportAction extends XPackUsageFeatureTransportActi
             return IPFilter.DISABLED_USAGE_STATS;
         }
         return ipFilter.usageStats();
+    }
+
+    static Map<String, Object> fips140Usage(Settings settings) {
+        return singletonMap("enabled", FIPS_MODE_ENABLED.get(settings));
     }
 }

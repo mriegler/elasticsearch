@@ -198,7 +198,7 @@ public class BoostingQueryBuilder extends AbstractQueryBuilder<BoostingQueryBuil
     }
 
     @Override
-    protected Query doToQuery(QueryShardContext context) throws IOException {
+    protected Query doToQuery(SearchExecutionContext context) throws IOException {
         Query positive = positiveQuery.toQuery(context);
         Query negative = negativeQuery.toQuery(context);
         return FunctionScoreQuery.boostByQuery(positive, negative, negativeBoost);
@@ -219,6 +219,10 @@ public class BoostingQueryBuilder extends AbstractQueryBuilder<BoostingQueryBuil
     @Override
     protected QueryBuilder doRewrite(QueryRewriteContext queryRewriteContext) throws IOException {
         QueryBuilder positiveQuery = this.positiveQuery.rewrite(queryRewriteContext);
+        if (positiveQuery instanceof MatchNoneQueryBuilder) {
+            return positiveQuery;
+        }
+
         QueryBuilder negativeQuery = this.negativeQuery.rewrite(queryRewriteContext);
         if (positiveQuery != this.positiveQuery || negativeQuery != this.negativeQuery) {
             BoostingQueryBuilder newQueryBuilder = new BoostingQueryBuilder(positiveQuery, negativeQuery);

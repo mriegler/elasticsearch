@@ -146,11 +146,8 @@ class LongValuesSource extends SingleDimensionValuesSource<Long> {
     void setAfter(Comparable value) {
         if (missingBucket && value == null) {
             afterValue = null;
-        } else if (value instanceof Number) {
-            afterValue = ((Number) value).longValue();
         } else {
-            // for date histogram source with "format", the after value is formatted
-            // as a string so we need to retrieve the original value in milliseconds.
+            // parse the value from a string in case it is a date or a formatted unsigned long.
             afterValue = format.parseLong(value.toString(), false, () -> {
                 throw new IllegalArgumentException("now() is not supported in [after] key");
             });
@@ -269,7 +266,8 @@ class LongValuesSource extends SingleDimensionValuesSource<Long> {
             }
             return new PointsSortedDocsProducer(fieldType.name(), toBucketFunction, lowerPoint, upperPoint);
         } else if (fieldType instanceof DateFieldMapper.DateFieldType) {
-            final ToLongFunction<byte[]> toBucketFunction = (value) -> rounding.applyAsLong(LongPoint.decodeDimension(value, 0));
+            ToLongFunction<byte[]> decode = ((DateFieldMapper.DateFieldType) fieldType).resolution()::parsePointAsMillis;
+            ToLongFunction<byte[]> toBucketFunction = value -> rounding.applyAsLong(decode.applyAsLong(value));
             return new PointsSortedDocsProducer(fieldType.name(), toBucketFunction, lowerPoint, upperPoint);
         } else {
             return null;

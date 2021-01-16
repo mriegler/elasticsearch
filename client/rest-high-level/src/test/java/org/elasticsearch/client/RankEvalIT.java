@@ -28,6 +28,7 @@ import org.elasticsearch.index.rankeval.EvaluationMetric;
 import org.elasticsearch.index.rankeval.ExpectedReciprocalRank;
 import org.elasticsearch.index.rankeval.MeanReciprocalRank;
 import org.elasticsearch.index.rankeval.PrecisionAtK;
+import org.elasticsearch.index.rankeval.RecallAtK;
 import org.elasticsearch.index.rankeval.RankEvalRequest;
 import org.elasticsearch.index.rankeval.RankEvalResponse;
 import org.elasticsearch.index.rankeval.RankEvalSpec;
@@ -107,7 +108,7 @@ public class RankEvalIT extends ESRestHighLevelClientTestCase {
         }
 
         // now try this when test2 is closed
-        client().performRequest(new Request("POST", "index2/_close"));
+        closeIndex("index2");
         rankEvalRequest.indicesOptions(IndicesOptions.fromParameters(null, "true", null, "false", SearchRequest.DEFAULT_INDICES_OPTIONS));
         response = execute(rankEvalRequest, highLevelClient()::rankEval, highLevelClient()::rankEvalAsync);
     }
@@ -130,9 +131,9 @@ public class RankEvalIT extends ESRestHighLevelClientTestCase {
      */
     public void testMetrics() throws IOException {
         List<RatedRequest> specifications = createTestEvaluationSpec();
-        List<Supplier<EvaluationMetric>> metrics = Arrays.asList(PrecisionAtK::new, MeanReciprocalRank::new, DiscountedCumulativeGain::new,
-                () -> new ExpectedReciprocalRank(1));
-        double expectedScores[] = new double[] {0.4285714285714286, 0.75, 1.6408962261063627, 0.4407738095238095};
+        List<Supplier<EvaluationMetric>> metrics = Arrays.asList(PrecisionAtK::new, RecallAtK::new,
+            MeanReciprocalRank::new, DiscountedCumulativeGain::new, () -> new ExpectedReciprocalRank(1));
+        double expectedScores[] = new double[] {0.4285714285714286, 1.0, 0.75, 1.6408962261063627, 0.4407738095238095};
         int i = 0;
         for (Supplier<EvaluationMetric> metricSupplier : metrics) {
             RankEvalSpec spec = new RankEvalSpec(specifications, metricSupplier.get());

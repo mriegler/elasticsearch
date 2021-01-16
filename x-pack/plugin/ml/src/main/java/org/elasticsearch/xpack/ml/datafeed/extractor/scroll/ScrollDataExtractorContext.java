@@ -5,9 +5,9 @@
  */
 package org.elasticsearch.xpack.ml.datafeed.extractor.scroll;
 
+import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
-import org.elasticsearch.xpack.ml.datafeed.extractor.fields.TimeBasedExtractedFields;
 
 import java.util.List;
 import java.util.Map;
@@ -24,10 +24,12 @@ class ScrollDataExtractorContext {
     final long start;
     final long end;
     final Map<String, String> headers;
+    final IndicesOptions indicesOptions;
+    final Map<String, Object> runtimeMappings;
 
     ScrollDataExtractorContext(String jobId, TimeBasedExtractedFields extractedFields, List<String> indices, QueryBuilder query,
                                List<SearchSourceBuilder.ScriptField> scriptFields, int scrollSize, long start, long end,
-                               Map<String, String> headers) {
+                               Map<String, String> headers, IndicesOptions indicesOptions, Map<String, Object> runtimeMappings) {
         this.jobId = Objects.requireNonNull(jobId);
         this.extractedFields = Objects.requireNonNull(extractedFields);
         this.indices = indices.toArray(new String[indices.size()]);
@@ -37,5 +39,7 @@ class ScrollDataExtractorContext {
         this.start = start;
         this.end = end;
         this.headers = headers;
+        this.indicesOptions = Objects.requireNonNull(indicesOptions);
+        this.runtimeMappings = Objects.requireNonNull(runtimeMappings);
     }
 }

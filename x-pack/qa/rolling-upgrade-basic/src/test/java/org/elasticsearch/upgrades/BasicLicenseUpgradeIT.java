@@ -22,16 +22,28 @@ public class BasicLicenseUpgradeIT extends AbstractUpgradeTestCase {
         assertBusy(this::checkNonExpiringBasicLicense);
     }
 
+    @SuppressWarnings("unchecked")
     private void checkBasicLicense() throws Exception {
-        Response licenseResponse = client().performRequest(new Request("GET", "/_license"));
+        final Request request = new Request("GET", "/_license");
+        // This avoids throwing a ResponseException when the license is not ready yet
+        // allowing to retry the check using assertBusy
+        request.addParameter("ignore", "404");
+        Response licenseResponse = client().performRequest(request);
+        assertOK(licenseResponse);
         Map<String, Object> licenseResponseMap = entityAsMap(licenseResponse);
         Map<String, Object> licenseMap = (Map<String, Object>) licenseResponseMap.get("license");
         assertEquals("basic", licenseMap.get("type"));
         assertEquals("active", licenseMap.get("status"));
     }
 
+    @SuppressWarnings("unchecked")
     private void checkNonExpiringBasicLicense() throws Exception {
-        Response licenseResponse = client().performRequest(new Request("GET", "/_license"));
+        final Request request = new Request("GET", "/_license");
+        // This avoids throwing a ResponseException when the license is not ready yet
+        // allowing to retry the check using assertBusy
+        request.addParameter("ignore", "404");
+        Response licenseResponse = client().performRequest(request);
+        assertOK(licenseResponse);
         Map<String, Object> licenseResponseMap = entityAsMap(licenseResponse);
         Map<String, Object> licenseMap = (Map<String, Object>) licenseResponseMap.get("license");
         assertEquals("basic", licenseMap.get("type"));

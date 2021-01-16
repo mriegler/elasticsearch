@@ -48,7 +48,7 @@ import static org.elasticsearch.test.AbstractXContentTestCase.xContentTester;
 import static org.hamcrest.CoreMatchers.containsString;
 
 public class GetSnapshotsResponseTests extends ESTestCase {
-    // We can not subclass AbstractStreamableXContentTestCase because it
+    // We can not subclass AbstractSerializingTestCase because it
     // can only be used for instances with equals and hashCode
     // GetSnapshotResponse does not override equals and hashCode.
     // It does not override equals and hashCode, because it
@@ -81,9 +81,9 @@ public class GetSnapshotsResponseTests extends ESTestCase {
             String reason = randomBoolean() ? null : "reason";
             ShardId shardId = new ShardId("index", UUIDs.base64UUID(), 2);
             List<SnapshotShardFailure> shardFailures = Collections.singletonList(new SnapshotShardFailure("node-id", shardId, "reason"));
-            snapshots.add(new SnapshotInfo(snapshotId, Arrays.asList("index1", "index2"), System.currentTimeMillis(), reason,
-                    System.currentTimeMillis(), randomIntBetween(2, 3), shardFailures, randomBoolean(),
-                    SnapshotInfoTests.randomUserMetadata()));
+            snapshots.add(new SnapshotInfo(snapshotId, Arrays.asList("index1", "index2"), Collections.singletonList("ds"),
+                System.currentTimeMillis(), reason, System.currentTimeMillis(), randomIntBetween(2, 3), shardFailures, randomBoolean(),
+                SnapshotInfoTests.randomUserMetadata()));
 
         }
         return snapshots;
@@ -123,7 +123,7 @@ public class GetSnapshotsResponseTests extends ESTestCase {
                 // Don't inject random fields into the custom snapshot metadata, because the metadata map is equality-checked after doing a
                 // round-trip through xContent serialization/deserialization. Even though the rest of the object ignores unknown fields,
                 // `metadata` doesn't ignore unknown fields (it just includes them in the parsed object, because the keys are arbitrary),
-                // so any new fields added to the the metadata before it gets deserialized that weren't in the serialized version will
+                // so any new fields added to the metadata before it gets deserialized that weren't in the serialized version will
                 // cause the equality check to fail.
 
                 // The actual fields are nested in an array, so this regex matches fields with names of the form

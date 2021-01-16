@@ -19,6 +19,7 @@
 
 package org.elasticsearch.action.admin.cluster.reroute;
 
+import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.message.ParameterizedMessage;
 import org.elasticsearch.ExceptionsHelper;
@@ -46,17 +47,18 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.ImmutableOpenIntMap;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.inject.Inject;
-import org.elasticsearch.common.io.stream.StreamInput;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 public class TransportClusterRerouteAction extends TransportMasterNodeAction<ClusterRerouteRequest, ClusterRerouteResponse> {
+
+    private static final Logger logger = LogManager.getLogger(TransportClusterRerouteAction.class);
 
     private final AllocationService allocationService;
 
@@ -65,14 +67,8 @@ public class TransportClusterRerouteAction extends TransportMasterNodeAction<Clu
                                          ThreadPool threadPool, AllocationService allocationService, ActionFilters actionFilters,
                                          IndexNameExpressionResolver indexNameExpressionResolver) {
         super(ClusterRerouteAction.NAME, transportService, clusterService, threadPool, actionFilters,
-              indexNameExpressionResolver, ClusterRerouteRequest::new);
+              ClusterRerouteRequest::new, indexNameExpressionResolver, ClusterRerouteResponse::new, ThreadPool.Names.SAME);
         this.allocationService = allocationService;
-    }
-
-    @Override
-    protected String executor() {
-        // we go async right away
-        return ThreadPool.Names.SAME;
     }
 
     @Override
@@ -81,17 +77,7 @@ public class TransportClusterRerouteAction extends TransportMasterNodeAction<Clu
     }
 
     @Override
-    protected ClusterRerouteResponse newResponse() {
-        throw new UnsupportedOperationException("usage of Streamable is to be replaced by Writeable");
-    }
-
-    @Override
-    protected ClusterRerouteResponse read(StreamInput in) throws IOException {
-        return new ClusterRerouteResponse(in);
-    }
-
-    @Override
-    protected void masterOperation(final ClusterRerouteRequest request, final ClusterState state,
+    protected void masterOperation(Task task, final ClusterRerouteRequest request, final ClusterState state,
                                    final ActionListener<ClusterRerouteResponse> listener) {
         Map<String, List<AbstractAllocateAllocationCommand>> stalePrimaryAllocations = new HashMap<>();
         for (AllocationCommand command : request.getCommands().commands()) {
@@ -154,8 +140,7 @@ public class TransportClusterRerouteAction extends TransportMasterNodeAction<Clu
 
     private void submitStateUpdate(final ClusterRerouteRequest request, final ActionListener<ClusterRerouteResponse> listener) {
         clusterService.submitStateUpdateTask("cluster_reroute (api)",
-            new ClusterRerouteResponseAckedClusterStateUpdateTask(logger, allocationService, request,
-                ActionListener.map(listener,
+            new ClusterRerouteResponseAckedClusterStateUpdateTask(logger, allocationService, request, listener.map(
                     response -> {
                         if (request.dryRun() == false) {
                             response.getExplanations().getYesDecisionMessages().forEach(logger::info);
@@ -164,7 +149,7 @@ public class TransportClusterRerouteAction extends TransportMasterNodeAction<Clu
                     })));
     }
 
-    static class ClusterRerouteResponseAckedClusterStateUpdateTask extends AckedClusterStateUpdateTask<ClusterRerouteResponse> {
+    static class ClusterRerouteResponseAckedClusterStateUpdateTask extends AckedClusterStateUpdateTask {
 
         private final ClusterRerouteRequest request;
         private final ActionListener<ClusterRerouteResponse> listener;

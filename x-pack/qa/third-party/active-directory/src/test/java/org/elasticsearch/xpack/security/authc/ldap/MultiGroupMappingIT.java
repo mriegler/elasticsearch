@@ -5,10 +5,10 @@
  */
 package org.elasticsearch.xpack.security.authc.ldap;
 
+import org.elasticsearch.common.util.CollectionUtils;
 import org.junit.BeforeClass;
 
 import java.io.IOException;
-import java.util.ArrayList;
 
 /**
  * This tests the mapping of multiple groups to a role in a file based role-mapping
@@ -26,8 +26,7 @@ public class MultiGroupMappingIT extends AbstractAdLdapRealmTestCase {
                 "  - \"cn=Avengers,ou=people,dc=oldap,dc=test,dc=elasticsearch,dc=com\"\n" +
                 "  - \"cn=Gods,ou=people,dc=oldap,dc=test,dc=elasticsearch,dc=com\"\n" +
                 "  - \"cn=Philanthropists,ou=people,dc=oldap,dc=test,dc=elasticsearch,dc=com\"\n";
-        roleMappings = new ArrayList<>(roleMappings);
-        roleMappings.add(new RoleMappingEntry(extraContent, null));
+        roleMappings = CollectionUtils.appendToCopy(roleMappings, new RoleMappingEntry(extraContent, null));
     }
 
     @Override
@@ -41,7 +40,6 @@ public class MultiGroupMappingIT extends AbstractAdLdapRealmTestCase {
                 "      privileges: [ all ]\n";
     }
 
-    @AwaitsFix(bugUrl = "https://github.com/elastic/elasticsearch/issues/35738")
     public void testGroupMapping() throws IOException {
         String asgardian = "odin";
         String securityPhilanthropist = realmConfig.loginWithCommonName ? "Bruce Banner" : "hulk";

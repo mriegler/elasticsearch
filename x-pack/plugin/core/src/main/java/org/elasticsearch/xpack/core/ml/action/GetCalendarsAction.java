@@ -5,11 +5,9 @@
  */
 package org.elasticsearch.xpack.core.ml.action;
 
-import org.elasticsearch.action.Action;
 import org.elasticsearch.action.ActionRequest;
-import org.elasticsearch.action.ActionRequestBuilder;
 import org.elasticsearch.action.ActionRequestValidationException;
-import org.elasticsearch.client.ElasticsearchClient;
+import org.elasticsearch.action.ActionType;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.ObjectParser;
@@ -28,18 +26,13 @@ import java.util.Objects;
 
 import static org.elasticsearch.action.ValidateActions.addValidationError;
 
-public class GetCalendarsAction extends Action<GetCalendarsAction.Response> {
+public class GetCalendarsAction extends ActionType<GetCalendarsAction.Response> {
 
     public static final GetCalendarsAction INSTANCE = new GetCalendarsAction();
     public static final String NAME = "cluster:monitor/xpack/ml/calendars/get";
 
     private GetCalendarsAction() {
-        super(NAME);
-    }
-
-    @Override
-    public Response newResponse() {
-        return new Response();
+        super(NAME, Response::new);
     }
 
     public static class Request extends ActionRequest implements ToXContentObject {
@@ -65,6 +58,12 @@ public class GetCalendarsAction extends Action<GetCalendarsAction.Response> {
         private PageParams pageParams;
 
         public Request() {
+        }
+
+        public Request(StreamInput in) throws IOException {
+            super(in);
+            calendarId = in.readOptionalString();
+            pageParams = in.readOptionalWriteable(PageParams::new);
         }
 
         public void setCalendarId(String calendarId) {
@@ -94,13 +93,6 @@ public class GetCalendarsAction extends Action<GetCalendarsAction.Response> {
                         validationException);
             }
             return validationException;
-        }
-
-        @Override
-        public void readFrom(StreamInput in) throws IOException {
-            super.readFrom(in);
-            calendarId = in.readOptionalString();
-            pageParams = in.readOptionalWriteable(PageParams::new);
         }
 
         @Override
@@ -141,20 +133,14 @@ public class GetCalendarsAction extends Action<GetCalendarsAction.Response> {
         }
     }
 
-    public static class RequestBuilder extends ActionRequestBuilder<Request, Response> {
-
-        public RequestBuilder(ElasticsearchClient client) {
-            super(client, INSTANCE, new Request());
-        }
-    }
-
     public static class Response extends AbstractGetResourcesResponse<Calendar> implements StatusToXContentObject {
 
         public Response(QueryPage<Calendar> calendars) {
             super(calendars);
         }
 
-        public Response() {
+        public Response(StreamInput in) throws IOException {
+            super(in);
         }
 
         @Override

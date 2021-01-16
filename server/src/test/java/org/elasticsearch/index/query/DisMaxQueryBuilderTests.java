@@ -24,7 +24,6 @@ import org.apache.lucene.search.BoostQuery;
 import org.apache.lucene.search.DisjunctionMaxQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
-import org.elasticsearch.search.internal.SearchContext;
 import org.elasticsearch.test.AbstractQueryTestCase;
 
 import java.io.IOException;
@@ -56,8 +55,8 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
     }
 
     @Override
-    protected void doAssertLuceneQuery(DisMaxQueryBuilder queryBuilder, Query query, SearchContext context) throws IOException {
-        Collection<Query> queries = AbstractQueryBuilder.toQueries(queryBuilder.innerQueries(), context.getQueryShardContext());
+    protected void doAssertLuceneQuery(DisMaxQueryBuilder queryBuilder, Query query, SearchExecutionContext context) throws IOException {
+        Collection<Query> queries = AbstractQueryBuilder.toQueries(queryBuilder.innerQueries(), context);
         assertThat(query, instanceOf(DisjunctionMaxQuery.class));
         DisjunctionMaxQuery disjunctionMaxQuery = (DisjunctionMaxQuery) query;
         assertThat(disjunctionMaxQuery.getTieBreakerMultiplier(), equalTo(queryBuilder.tieBreaker()));
@@ -94,7 +93,7 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
                 "        \"queries\":[\n" +
                 "            {\n" +
                 "                \"prefix\":{\n" +
-                "                    \"" + STRING_FIELD_NAME + "\":{\n" +
+                "                    \"" + TEXT_FIELD_NAME + "\":{\n" +
                 "                        \"value\":\"sh\",\n" +
                 "                        \"boost\":1.2\n" +
                 "                    }\n" +
@@ -103,7 +102,7 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
                 "        ]\n" +
                 "    }\n" +
                 "}";
-        Query query = parseQuery(queryAsString).toQuery(createShardContext());
+        Query query = parseQuery(queryAsString).toQuery(createSearchExecutionContext());
         assertThat(query, instanceOf(DisjunctionMaxQuery.class));
         DisjunctionMaxQuery disjunctionMaxQuery = (DisjunctionMaxQuery) query;
 
@@ -116,7 +115,7 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
         assertThat(boostQuery.getQuery(), instanceOf(PrefixQuery.class));
         PrefixQuery firstQ = (PrefixQuery) boostQuery.getQuery();
         // since age is automatically registered in data, we encode it as numeric
-        assertThat(firstQ.getPrefix(), equalTo(new Term(STRING_FIELD_NAME, "sh")));
+        assertThat(firstQ.getPrefix(), equalTo(new Term(TEXT_FIELD_NAME, "sh")));
 
     }
 
@@ -155,15 +154,15 @@ public class DisMaxQueryBuilderTests extends AbstractQueryTestCase<DisMaxQueryBu
     public void testRewriteMultipleTimes() throws IOException {
         DisMaxQueryBuilder dismax = new DisMaxQueryBuilder();
         dismax.add(new WrapperQueryBuilder(new WrapperQueryBuilder(new MatchAllQueryBuilder().toString()).toString()));
-        QueryBuilder rewritten = dismax.rewrite(createShardContext());
+        QueryBuilder rewritten = dismax.rewrite(createSearchExecutionContext());
         DisMaxQueryBuilder expected = new DisMaxQueryBuilder();
         expected.add(new MatchAllQueryBuilder());
         assertEquals(expected, rewritten);
 
         expected = new DisMaxQueryBuilder();
         expected.add(new MatchAllQueryBuilder());
-        QueryBuilder rewrittenAgain = rewritten.rewrite(createShardContext());
+        QueryBuilder rewrittenAgain = rewritten.rewrite(createSearchExecutionContext());
         assertEquals(rewrittenAgain, expected);
-        assertEquals(Rewriteable.rewrite(dismax, createShardContext()), expected);
+        assertEquals(Rewriteable.rewrite(dismax, createSearchExecutionContext()), expected);
     }
 }

@@ -25,8 +25,6 @@ import org.elasticsearch.xpack.core.ml.calendars.Calendar;
 import org.elasticsearch.xpack.ml.job.JobManager;
 import org.elasticsearch.xpack.ml.job.persistence.JobResultsProvider;
 
-import java.util.function.Supplier;
-
 import static org.elasticsearch.xpack.core.ClientHelper.ML_ORIGIN;
 import static org.elasticsearch.xpack.core.ClientHelper.executeAsyncWithOrigin;
 
@@ -40,8 +38,7 @@ public class TransportDeleteCalendarAction extends HandledTransportAction<Delete
     public TransportDeleteCalendarAction(TransportService transportService,
                                          ActionFilters actionFilters, Client client, JobManager jobManager,
                                          JobResultsProvider jobResultsProvider) {
-        super(DeleteCalendarAction.NAME, transportService, actionFilters,
-            (Supplier<DeleteCalendarAction.Request>) DeleteCalendarAction.Request::new);
+        super(DeleteCalendarAction.NAME, transportService, actionFilters, DeleteCalendarAction.Request::new);
         this.client = client;
         this.jobManager = jobManager;
         this.jobResultsProvider = jobResultsProvider;
@@ -64,7 +61,7 @@ public class TransportDeleteCalendarAction extends HandledTransportAction<Delete
                                 }
 
                                 jobManager.updateProcessOnCalendarChanged(calendar.getJobIds(), ActionListener.wrap(
-                                        r -> listener.onResponse(new AcknowledgedResponse(true)),
+                                        r -> listener.onResponse(AcknowledgedResponse.TRUE),
                                         listener::onFailure
                                 ));
                             },
@@ -77,7 +74,7 @@ public class TransportDeleteCalendarAction extends HandledTransportAction<Delete
     }
 
     private DeleteByQueryRequest buildDeleteByQuery(String calendarId) {
-        DeleteByQueryRequest request = new DeleteByQueryRequest(MlMetaIndex.INDEX_NAME);
+        DeleteByQueryRequest request = new DeleteByQueryRequest(MlMetaIndex.indexName());
         request.setSlices(AbstractBulkByScrollRequest.AUTO_SLICES);
         request.setRefresh(true);
 

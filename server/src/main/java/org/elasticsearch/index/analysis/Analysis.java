@@ -33,6 +33,7 @@ import org.apache.lucene.analysis.de.GermanAnalyzer;
 import org.apache.lucene.analysis.el.GreekAnalyzer;
 import org.apache.lucene.analysis.en.EnglishAnalyzer;
 import org.apache.lucene.analysis.es.SpanishAnalyzer;
+import org.apache.lucene.analysis.et.EstonianAnalyzer;
 import org.apache.lucene.analysis.eu.BasqueAnalyzer;
 import org.apache.lucene.analysis.fa.PersianAnalyzer;
 import org.apache.lucene.analysis.fi.FinnishAnalyzer;
@@ -59,6 +60,7 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.env.Environment;
+import org.elasticsearch.index.IndexSettings;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -78,24 +80,19 @@ import static java.util.Map.entry;
 
 public class Analysis {
 
-    public static Version parseAnalysisVersion(Settings indexSettings, Settings settings, Logger logger) {
+    public static Version parseAnalysisVersion(IndexSettings indexSettings, Settings settings, Logger logger) {
         // check for explicit version on the specific analyzer component
         String sVersion = settings.get("version");
         if (sVersion != null) {
             return Lucene.parseVersion(sVersion, Version.LATEST, logger);
         }
         // check for explicit version on the index itself as default for all analysis components
-        sVersion = indexSettings.get("index.analysis.version");
+        sVersion = indexSettings.getSettings().get("index.analysis.version");
         if (sVersion != null) {
             return Lucene.parseVersion(sVersion, Version.LATEST, logger);
         }
         // resolve the analysis version based on the version the index was created with
-        return org.elasticsearch.Version.indexCreated(indexSettings).luceneVersion;
-    }
-
-    public static boolean isNoStopwords(Settings settings) {
-        String value = settings.get("stopwords");
-        return value != null && "_none_".equals(value);
+        return indexSettings.getIndexVersionCreated().luceneVersion;
     }
 
     public static CharArraySet parseStemExclusion(Settings settings, CharArraySet defaultStemExclusion) {
@@ -124,6 +121,7 @@ public class Analysis {
             entry("_danish_", DanishAnalyzer.getDefaultStopSet()),
             entry("_dutch_", DutchAnalyzer.getDefaultStopSet()),
             entry("_english_", EnglishAnalyzer.getDefaultStopSet()),
+            entry("_estonian_", EstonianAnalyzer.getDefaultStopSet()),
             entry("_finnish_", FinnishAnalyzer.getDefaultStopSet()),
             entry("_french_", FrenchAnalyzer.getDefaultStopSet()),
             entry("_galician_", GalicianAnalyzer.getDefaultStopSet()),
@@ -215,7 +213,7 @@ public class Analysis {
      *          If the word list cannot be found at either key.
      */
     public static List<String> getWordList(Environment env, Settings settings, String settingPrefix) {
-        return getWordList(env, settings, settingPrefix + "_path", settingPrefix);
+        return getWordList(env, settings, settingPrefix + "_path", settingPrefix, true);
     }
 
     /**
@@ -225,7 +223,8 @@ public class Analysis {
      * @throws IllegalArgumentException
      *          If the word list cannot be found at either key.
      */
-    public static List<String> getWordList(Environment env, Settings settings, String settingPath, String settingList) {
+    public static List<String> getWordList(Environment env, Settings settings,
+                                           String settingPath, String settingList, boolean removeComments) {
         String wordListPath = settings.get(settingPath, null);
 
         if (wordListPath == null) {
@@ -240,7 +239,7 @@ public class Analysis {
         final Path path = env.configFile().resolve(wordListPath);
 
         try {
-            return loadWordList(path, "#");
+            return loadWordList(path, removeComments);
         } catch (CharacterCodingException ex) {
             String message = String.format(Locale.ROOT,
                 "Unsupported character encoding detected while reading %s: %s - files must be UTF-8 encoded",
@@ -252,15 +251,15 @@ public class Analysis {
         }
     }
 
-    private static List<String> loadWordList(Path path, String comment) throws IOException {
+    private static List<String> loadWordList(Path path, boolean removeComments) throws IOException {
         final List<String> result = new ArrayList<>();
         try (BufferedReader br = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             String word;
             while ((word = br.readLine()) != null) {
-                if (!Strings.hasText(word)) {
+                if (Strings.hasText(word) == false) {
                     continue;
                 }
-                if (!word.startsWith(comment)) {
+                if (removeComments == false || word.startsWith("#") == false) {
                     result.add(word.trim());
                 }
             }

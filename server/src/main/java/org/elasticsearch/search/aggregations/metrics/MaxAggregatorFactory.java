@@ -22,34 +22,49 @@ package org.elasticsearch.search.aggregations.metrics;
 import org.elasticsearch.search.aggregations.Aggregator;
 import org.elasticsearch.search.aggregations.AggregatorFactories;
 import org.elasticsearch.search.aggregations.AggregatorFactory;
-import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
-import org.elasticsearch.search.aggregations.support.ValuesSource;
-import org.elasticsearch.search.aggregations.support.ValuesSource.Numeric;
+import org.elasticsearch.search.aggregations.CardinalityUpperBound;
+import org.elasticsearch.search.aggregations.support.AggregationContext;
+import org.elasticsearch.search.aggregations.support.CoreValuesSourceType;
 import org.elasticsearch.search.aggregations.support.ValuesSourceAggregatorFactory;
 import org.elasticsearch.search.aggregations.support.ValuesSourceConfig;
-import org.elasticsearch.search.internal.SearchContext;
+import org.elasticsearch.search.aggregations.support.ValuesSourceRegistry;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 
-class MaxAggregatorFactory extends ValuesSourceAggregatorFactory<ValuesSource.Numeric, MaxAggregatorFactory> {
+class MaxAggregatorFactory extends ValuesSourceAggregatorFactory {
 
-    MaxAggregatorFactory(String name, ValuesSourceConfig<Numeric> config, SearchContext context,
-            AggregatorFactory<?> parent, AggregatorFactories.Builder subFactoriesBuilder, Map<String, Object> metaData) throws IOException {
-        super(name, config, context, parent, subFactoriesBuilder, metaData);
+    private final MetricAggregatorSupplier aggregatorSupplier;
+
+    static void registerAggregators(ValuesSourceRegistry.Builder builder) {
+        builder.register(
+            MaxAggregationBuilder.REGISTRY_KEY,
+            List.of(CoreValuesSourceType.NUMERIC, CoreValuesSourceType.DATE, CoreValuesSourceType.BOOLEAN),
+            MaxAggregator::new,
+                true);
+    }
+
+    MaxAggregatorFactory(String name, ValuesSourceConfig config, AggregationContext context,
+                         AggregatorFactory parent, AggregatorFactories.Builder subFactoriesBuilder,
+                         Map<String, Object> metadata,
+                         MetricAggregatorSupplier aggregatorSupplier) throws IOException {
+        super(name, config, context, parent, subFactoriesBuilder, metadata);
+        this.aggregatorSupplier = aggregatorSupplier;
     }
 
     @Override
-    protected Aggregator createUnmapped(Aggregator parent,
-            List<PipelineAggregator> pipelineAggregators, Map<String, Object> metaData) throws IOException {
-        return new MaxAggregator(name, config, null, context, parent, pipelineAggregators, metaData);
+    protected Aggregator createUnmapped(Aggregator parent, Map<String, Object> metadata) throws IOException {
+        return new MaxAggregator(name, config, context, parent, metadata);
     }
 
     @Override
-    protected Aggregator doCreateInternal(ValuesSource.Numeric valuesSource, Aggregator parent,
-            boolean collectsFromSingleBucket, List<PipelineAggregator> pipelineAggregators, Map<String, Object> metaData)
-                    throws IOException {
-        return new MaxAggregator(name, config, valuesSource, context, parent, pipelineAggregators, metaData);
+    protected Aggregator doCreateInternal(
+        Aggregator parent,
+        CardinalityUpperBound cardinality,
+        Map<String, Object> metadata
+    ) throws IOException {
+        return aggregatorSupplier
+            .build(name, config, context, parent, metadata);
     }
 }

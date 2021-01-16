@@ -20,10 +20,12 @@
 package org.elasticsearch.repositories.gcs;
 
 import org.elasticsearch.common.blobstore.BlobContainer;
-import org.elasticsearch.common.blobstore.BlobMetaData;
+import org.elasticsearch.common.blobstore.BlobMetadata;
 import org.elasticsearch.common.blobstore.BlobPath;
 import org.elasticsearch.common.blobstore.BlobStoreException;
+import org.elasticsearch.common.blobstore.DeleteResult;
 import org.elasticsearch.common.blobstore.support.AbstractBlobContainer;
+import org.elasticsearch.common.bytes.BytesReference;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -52,7 +54,7 @@ class GoogleCloudStorageBlobContainer extends AbstractBlobContainer {
     }
 
     @Override
-    public Map<String, BlobMetaData> listBlobs() throws IOException {
+    public Map<String, BlobMetadata> listBlobs() throws IOException {
         return blobStore.listBlobs(path);
     }
 
@@ -62,7 +64,7 @@ class GoogleCloudStorageBlobContainer extends AbstractBlobContainer {
     }
 
     @Override
-    public Map<String, BlobMetaData> listBlobsByPrefix(String prefix) throws IOException {
+    public Map<String, BlobMetadata> listBlobsByPrefix(String prefix) throws IOException {
         return blobStore.listBlobsByPrefix(path, prefix);
     }
 
@@ -72,23 +74,23 @@ class GoogleCloudStorageBlobContainer extends AbstractBlobContainer {
     }
 
     @Override
+    public InputStream readBlob(final String blobName, final long position, final long length) throws IOException {
+        return blobStore.readBlob(buildKey(blobName), position, length);
+    }
+
+    @Override
     public void writeBlob(String blobName, InputStream inputStream, long blobSize, boolean failIfAlreadyExists) throws IOException {
         blobStore.writeBlob(buildKey(blobName), inputStream, blobSize, failIfAlreadyExists);
     }
 
     @Override
-    public void writeBlobAtomic(String blobName, InputStream inputStream, long blobSize, boolean failIfAlreadyExists) throws IOException {
-        writeBlob(blobName, inputStream, blobSize, failIfAlreadyExists);
+    public void writeBlobAtomic(String blobName, BytesReference bytes, boolean failIfAlreadyExists) throws IOException {
+        writeBlob(blobName, bytes, failIfAlreadyExists);
     }
 
     @Override
-    public void deleteBlob(String blobName) throws IOException {
-        blobStore.deleteBlob(buildKey(blobName));
-    }
-
-    @Override
-    public void delete() throws IOException {
-        blobStore.deleteDirectory(path().buildAsString());
+    public DeleteResult delete() throws IOException {
+        return blobStore.deleteDirectory(path().buildAsString());
     }
 
     @Override

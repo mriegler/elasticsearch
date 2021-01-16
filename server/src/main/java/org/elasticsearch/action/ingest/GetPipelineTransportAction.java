@@ -29,6 +29,7 @@ import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.ingest.IngestService;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 
@@ -39,21 +40,11 @@ public class GetPipelineTransportAction extends TransportMasterNodeReadAction<Ge
                                       TransportService transportService, ActionFilters actionFilters,
                                       IndexNameExpressionResolver indexNameExpressionResolver) {
         super(GetPipelineAction.NAME, transportService, clusterService, threadPool, actionFilters, GetPipelineRequest::new,
-                indexNameExpressionResolver);
+                indexNameExpressionResolver, GetPipelineResponse::new, ThreadPool.Names.SAME);
     }
 
     @Override
-    protected String executor() {
-        return ThreadPool.Names.SAME;
-    }
-
-    @Override
-    protected GetPipelineResponse newResponse() {
-        return new GetPipelineResponse();
-    }
-
-    @Override
-    protected void masterOperation(GetPipelineRequest request, ClusterState state, ActionListener<GetPipelineResponse> listener)
+    protected void masterOperation(Task task, GetPipelineRequest request, ClusterState state, ActionListener<GetPipelineResponse> listener)
             throws Exception {
         listener.onResponse(new GetPipelineResponse(IngestService.getPipelines(state, request.getIds())));
     }

@@ -73,10 +73,6 @@ public abstract class Collector {
      * @param isElectedMaster true if the current local node is the elected master node
      */
     protected boolean shouldCollect(final boolean isElectedMaster) {
-        if (licenseState.isMonitoringAllowed() == false) {
-            logger.trace("collector [{}] can not collect data due to invalid license", name());
-            return false;
-        }
         return true;
     }
 
@@ -88,7 +84,7 @@ public abstract class Collector {
                 return doCollect(convertNode(timestamp, clusterService.localNode()), interval, clusterState);
             }
         } catch (ElasticsearchTimeoutException e) {
-            logger.error((Supplier<?>) () -> new ParameterizedMessage("collector [{}] timed out when collecting data", name()));
+            logger.error("collector [{}] timed out when collecting data: {}", name(), e.getMessage());
         } catch (Exception e) {
             logger.error((Supplier<?>) () -> new ParameterizedMessage("collector [{}] failed to collect data", name()), e);
         }
@@ -115,7 +111,7 @@ public abstract class Collector {
      * @return the cluster's UUID
      */
     protected static String clusterUuid(final ClusterState clusterState) {
-        return clusterState.metaData().clusterUUID();
+        return clusterState.metadata().clusterUUID();
     }
 
     /**

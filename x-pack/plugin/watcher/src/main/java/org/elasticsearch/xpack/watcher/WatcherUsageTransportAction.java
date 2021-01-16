@@ -15,7 +15,9 @@ import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.license.XPackLicenseState;
+import org.elasticsearch.license.XPackLicenseState.Feature;
 import org.elasticsearch.protocol.xpack.XPackUsageRequest;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.threadpool.ThreadPool;
 import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.xpack.core.XPackSettings;
@@ -52,12 +54,14 @@ public class WatcherUsageTransportAction extends XPackUsageFeatureTransportActio
     }
 
     @Override
-    protected void masterOperation(XPackUsageRequest request, ClusterState state, ActionListener<XPackUsageFeatureResponse> listener) {
+    protected void masterOperation(Task task, XPackUsageRequest request, ClusterState state,
+                                   ActionListener<XPackUsageFeatureResponse> listener) {
         if (enabled) {
             try (ThreadContext.StoredContext ignore =
                      client.threadPool().getThreadContext().stashWithOrigin(WATCHER_ORIGIN)) {
                 WatcherStatsRequest statsRequest = new WatcherStatsRequest();
                 statsRequest.includeStats(true);
+                statsRequest.setParentTask(clusterService.localNode().getId(), task.getId());
                 client.execute(WatcherStatsAction.INSTANCE, statsRequest, ActionListener.wrap(r -> {
                     List<Counters> countersPerNode = r.getNodes()
                         .stream()
@@ -66,13 +70,13 @@ public class WatcherUsageTransportAction extends XPackUsageFeatureTransportActio
                         .collect(Collectors.toList());
                     Counters mergedCounters = Counters.merge(countersPerNode);
                     WatcherFeatureSetUsage usage =
-                        new WatcherFeatureSetUsage(licenseState.isWatcherAllowed(), true, mergedCounters.toNestedMap());
+                        new WatcherFeatureSetUsage(licenseState.isAllowed(Feature.WATCHER), true, mergedCounters.toNestedMap());
                     listener.onResponse(new XPackUsageFeatureResponse(usage));
                 }, listener::onFailure));
             }
         } else {
             WatcherFeatureSetUsage usage =
-                new WatcherFeatureSetUsage(licenseState.isWatcherAllowed(), false, Collections.emptyMap());
+                new WatcherFeatureSetUsage(licenseState.isAllowed(Feature.WATCHER), false, Collections.emptyMap());
             listener.onResponse(new XPackUsageFeatureResponse(usage));
         }
     }
